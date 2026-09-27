@@ -1,0 +1,11 @@
+module forensic_demo {
+
+    collect system
+    collect processes
+    collect network
+    collect users
+    collect services
+    collect filesystem
+    collect environment
+    collect logs
+}

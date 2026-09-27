@@ -1,0 +1,16 @@
+module full_forensic {
+
+    collect system
+    collect processes
+    collect network
+    collect users
+    collect services
+    collect mounts
+    collect software
+    collect filesystem
+    collect disk_usage
+    collect scheduled_tasks
+    collect environment
+    collect logs
+    collect removable_media
+}

@@ -1,0 +1,92 @@
+name: JOCKY Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  tests-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt pytest pyinstaller
+      - run: python -m pytest -q --tb=short
+      - run: python -c "from collector.security_assessment import assess_endpoint; assert assess_endpoint()['read_only'] is True"
+
+  tests-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt pytest pyinstaller
+      - run: python -m pytest tests/test_lexer.py tests/test_parser.py tests/test_plan.py tests/test_audit.py tests/test_windows_forensics.py -q
+
+  build-linux-agent:
+    needs: tests-linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt pyinstaller
+      - run: python deploy/build_agent.py --platform linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jocky-agent-linux
+          path: |
+            dist/jocky-agent-linux
+            dist/jocky-agent-linux.manifest.json
+
+  build-windows-agent:
+    needs: tests-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install -r requirements.txt pyinstaller
+      - run: python deploy/build_agent.py --platform windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jocky-agent-windows
+          path: |
+            dist/jocky-agent-windows.exe
+            dist/jocky-agent-windows.exe.manifest.json
+
+  package-and-publish:
+    needs: [build-linux-agent, build-windows-agent]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {name: jocky-agent-linux, path: dist/linux}
+      - uses: actions/download-artifact@v4
+        with: {name: jocky-agent-windows, path: dist/windows}
+      - name: Create checksums
+        shell: bash
+        run: |
+          sha256sum dist/linux/jocky-agent-linux > dist/linux/jocky-agent-linux.sha256
+          sha256sum dist/windows/jocky-agent-windows.exe > dist/windows/jocky-agent-windows.exe.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/linux/jocky-agent-linux
+            dist/linux/jocky-agent-linux.manifest.json
+            dist/linux/jocky-agent-linux.sha256
+            dist/windows/jocky-agent-windows.exe
+            dist/windows/jocky-agent-windows.exe.manifest.json
+            dist/windows/jocky-agent-windows.exe.sha256
+          generate_release_notes: true
+          body: |
+            ## JOCKY ${{ github.ref_name }}
+
+            Native Linux and Windows forensic agents were built on their respective native CI runners.
+            Each artifact includes build provenance and a SHA-256 manifest.
+
+            Security boundary: forensic collection and defensive detection; no operational security-control bypass is included.

@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  jocky-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: jocky_central_server
+    ports:
+      - "127.0.0.1:5000:5000"   # Only bind to localhost; nginx terminates TLS
+    environment:
+      - JOCKY_PORT=5000
+      - JOCKY_HOST=127.0.0.1
+      - JOCKY_DB=/app/data/jocky_forensics.db
+      - JOCKY_EVIDENCE_DIR=/app/data/evidence
+      - JOCKY_BACKUP_DIR=/app/data/backups
+      - JOCKY_API_KEY=${JOCKY_API_KEY:?JOCKY_API_KEY must be set in .env}
+      - JOCKY_BACKUP_INTERVAL_HOURS=${JOCKY_BACKUP_INTERVAL_HOURS:-6}
+      - JOCKY_JOB_TIMEOUT_MINUTES=${JOCKY_JOB_TIMEOUT_MINUTES:-60}
+      - JOCKY_STALE_DEVICE_DAYS=${JOCKY_STALE_DEVICE_DAYS:-30}
+    volumes:
+      - jocky_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
+
+  # Backup sidecar: runs jocky_backup.py on a schedule
+  jocky-backup:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: jocky_backup
+    command: >
+      sh -c "while true; do
+        python /app/deploy/jocky_backup.py;
+        sleep ${JOCKY_BACKUP_INTERVAL_SECONDS:-21600};
+      done"
+    environment:
+      - JOCKY_DB=/app/data/jocky_forensics.db
+      - JOCKY_BACKUP_DIR=/app/data/backups
+    volumes:
+      - jocky_data:/app/data
+    depends_on:
+      jocky-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  jocky_data:
+    driver: local

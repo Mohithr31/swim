@@ -1,0 +1,30 @@
+# JOCKY Combined — Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Web framework
+Flask>=3.0.0
+Werkzeug>=3.0.0
+
+# Cryptography (AES-256-GCM evidence encryption)
+cryptography>=41.0.0
+
+# HTTP client (agent → server communication)
+requests>=2.31.0
+
+# Environment config
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-mock>=3.12.0
+
+# PDF report generation (optional — server /report/pdf endpoint)
+# Uncomment if WeasyPrint is available on your platform:
+# weasyprint>=60.0
+
+# System monitoring (live_monitor on Linux)
+# psutil is cross-platform and already in stdlib on many distros
+psutil>=5.9.0
+
+# Native single-file agent packaging (dashboard build action)
+pyinstaller>=6.0

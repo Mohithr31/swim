@@ -1,0 +1,58 @@
+# Environment & Secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
+env/
+
+# Data & Evidence (runtime artifacts)
+evidence/
+cases/
+*.db
+*.sqlite3
+manifest.json
+archive.tar.gz
+
+# C / Build artifacts
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.a
+*.out
+a.out
+
+# IDEs & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets / environment
+.env
+
+# Runtime database / local evidence
+*.db
+evidence/*
+
+# Python cache / test cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Build artifacts
+dist/
+build/
+
+# Logs
+*.log

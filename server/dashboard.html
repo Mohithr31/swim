@@ -1,0 +1,1519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f172a">
+<title>DFIR Gateway — JOCKY Forensic Platform</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','ui-sans-serif','system-ui'],mono:['JetBrains Mono','ui-monospace','SFMono-Regular']}}}}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+:root{--bg:#f8fafc;--bg2:#f1f5f9;--white:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--navy:#1e3a8a;--navy2:#172554;--ok:#166534;--warn:#a16207;--danger:#b91c1c;--accent:#0284c7}
+body.dark{--bg:#0b1120;--bg2:#0f172a;--white:#111827;--ink:#e2e8f0;--muted:#94a3b8;--line:#1e293b;--navy:#3b82f6;--navy2:#1e3a8a;--ok:#4ade80;--warn:#facc15;--danger:#f87171;--accent:#38bdf8}
+body.dark html,body.dark{background:var(--bg);color:var(--ink)}
+body.dark .gov-header,body.dark .topbar,body.dark .sidebar,body.dark .card,body.dark .case-cell,body.dark .modal,body.dark .modal-head,.dark .os-card{background:#111827!important;color:#e2e8f0;border-color:var(--line)}
+body.dark .sidebar{border-color:#1e293b}body.dark .nav-item{color:#cbd5e1}body.dark .nav-item:hover{background:#1e293b;color:#fff}body.dark .nav-item.active{background:#1e3a8a;color:#93c5fd}
+body.dark .app-shell{background:#0b1120}body.dark .input,body.dark .select,body.dark .textarea{background:#0f172a;color:#e2e8f0;border-color:#334155}body.dark .btn{background:#111827;color:#e2e8f0;border-color:#334155}body.dark .btn:hover{background:#1e293b;border-color:#475569}body.dark th{background:#1e293b;color:#94a3b8}body.dark td{border-color:#1e293b}body.dark tbody tr:hover{background:#1e293b}body.dark .table-wrap{background:#111827;border-color:#1e293b}body.dark .security-badge{background:#172554;color:#bfdbfe;border-color:#1d4ed8}body.dark .lock{background:#052e1a;color:#86efac;border-color:#166534}body.dark .pathbar .input{background:#0f172a}body.dark .modal-back{background:rgba(2,6,23,.78)}body.dark .close{background:#1e293b;color:#cbd5e1}body.dark .close:hover{background:#334155}body.dark .os-card.selected{background:#172554}
+.theme-toggle{width:34px;height:34px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;display:inline-grid;place-items:center;cursor:pointer}.theme-toggle:hover{background:#f8fafc}.refresh-toggle.is-refreshing i{animation:spin .7s linear infinite}.refresh-toggle{font-size:13px}.theme-toggle .sun{display:none}body.dark .theme-toggle{background:#111827;color:#f8fafc;border-color:#334155}body.dark .theme-toggle .moon{display:none}body.dark .theme-toggle .sun{display:block}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}.page{min-height:100vh}.hiddenx{display:none!important}
+.fadeIn{animation:fadeIn .2s ease-out}.slideUp{animation:slideUp .25s ease-out}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 3px rgba(15,23,42,.04)}
+.btn{height:34px;padding:0 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-weight:600;font-size:12px;display:inline-flex;gap:7px;align-items:center;justify-content:center;cursor:pointer;transition:.12s}
+.btn:hover{border-color:#94a3b8;background:#f8fafc}.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--navy);border-color:var(--navy);color:#fff}.btn-primary:hover{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.btn-success{background:#15803d;border-color:#15803d;color:#fff}.btn-success:hover{background:#166534;border-color:#166534;color:#fff}
+.btn-danger{color:#991b1b;border-color:#fecaca;background:#fff}.btn-danger:hover{background:#fee2e2}
+.btn-sm{height:28px;padding:0 9px;font-size:11px}
+.input,.select,.textarea{width:100%;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;padding:8px 10px;font-size:12px;outline:none}
+.input:focus,.select:focus,.textarea:focus{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.1)}.textarea{min-height:90px;resize:vertical}
+.label{font-size:11px;font-weight:600;color:#334155;margin-bottom:4px;display:block}.required:after{content:" *";color:#b91c1c}
+.classification{background:#0f172a;color:#fff;font-size:10px;font-weight:700;letter-spacing:.13em;text-align:center;padding:6px 10px}
+.gov-header{border-bottom:1px solid var(--line);background:#fff}.gov-inner{max-width:1200px;margin:auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.agency-mark{display:flex;align-items:center;gap:11px}.agency-seal{width:38px;height:38px;border:2px solid #1e3a8a;border-radius:50%;display:grid;place-items:center;color:#1e3a8a;font-size:16px}.agency-name{font-size:13px;font-weight:700}.agency-sub{font-size:10px;color:#64748b;letter-spacing:.06em;margin-top:1px}
+.security-badge{font-size:10px;color:#1e3a8a;border:1px solid #bfdbfe;background:#eff6ff;padding:6px 9px;border-radius:5px;font-weight:700;white-space:nowrap}
+.auth-wrap{min-height:calc(100vh - 80px);display:grid;place-items:center;padding:24px 16px}.auth-card{width:min(480px,100%)}.auth-title{font-size:22px;font-weight:700;letter-spacing:-.02em}.auth-copy{font-size:12px;color:#64748b;line-height:1.5}.crypto-foot{border-top:1px solid var(--line);padding:10px 16px;display:flex;justify-content:space-between;gap:10px;color:#64748b;font-size:10px}
+.stepbar{display:flex;align-items:center;gap:0;margin-bottom:18px}.step{display:flex;align-items:center;gap:7px;font-size:11px;color:#94a3b8}.step .n{width:24px;height:24px;border:1px solid #cbd5e1;border-radius:50%;display:grid;place-items:center;background:#fff;font-weight:700}.step.active{color:#1e3a8a;font-weight:700}.step.active .n{background:#1e3a8a;border-color:#1e3a8a;color:#fff}.step.done{color:#166534}.step.done .n{background:#f0fdf4;border-color:#86efac;color:#166534}.step-line{height:1px;background:#e2e8f0;flex:1;margin:0 10px}
+.intake-wrap{max-width:1180px;margin:auto;padding:20px 20px 40px}.section-title{font-size:16px;font-weight:700}.section-copy{font-size:11px;color:#64748b;margin-top:2px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.field-full{grid-column:1/-1}.os-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.os-card{border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:14px;text-align:left;cursor:pointer;transition:.15s}.os-card:hover{border-color:#94a3b8}.os-card.selected{border-color:#1e3a8a;box-shadow:0 0 0 2px rgba(30,58,138,.12);background:#f8fbff}.os-icon{width:36px;height:36px;border-radius:6px;background:#eff6ff;color:#1e3a8a;display:grid;place-items:center;font-size:17px;margin-bottom:8px}
+.app-shell{min-height:100vh;background:#f1f5f9}.topbar{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:12px;position:sticky;top:0;z-index:20}.brand-small{font-size:14px;font-weight:700}.top-meta{display:flex;gap:8px;align-items:center;margin-left:auto}.lock{font-size:10px;font-weight:700;letter-spacing:.05em;border:1px solid #bbf7d0;color:#166534;background:#f0fdf4;padding:6px 9px;border-radius:5px}
+.layout{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:calc(100vh - 58px)}.sidebar{background:#fff;border-right:1px solid var(--line);padding:10px 8px;position:sticky;top:58px;height:calc(100vh - 58px);overflow:auto}.nav-label{font-size:9px;letter-spacing:.12em;font-weight:700;color:#94a3b8;margin:10px 8px 4px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:#475569;text-align:left;padding:7px 9px;border-radius:6px;font-size:11.5px;cursor:pointer;transition:.12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nav-item:hover{background:#f8fafc;color:#0f172a}.nav-item.active{background:#eff6ff;color:#1e3a8a;font-weight:700}.nav-item i{width:15px;text-align:center;font-size:12px}.workspace{padding:16px 20px 40px;min-width:0}.case-banner{display:grid;grid-template-columns:1fr repeat(4,minmax(110px,.75fr));gap:1px;background:#cbd5e1;border:1px solid #cbd5e1;border-radius:7px;overflow:hidden;margin-bottom:14px}.case-cell{background:#fff;padding:9px 12px;min-width:0}.case-cell .k{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px}.case-cell .v{font-size:11px;font-weight:600;overflow-wrap:anywhere}.severity{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700}.sev-critical{background:#fef2f2;color:#b91c1c}.sev-high{background:#fff7ed;color:#c2410c}.sev-medium{background:#fefce8;color:#a16207}.sev-low{background:#f0fdf4;color:#166534}.sev-info{background:#f1f5f9;color:#475569}
+.view-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:2px 0 12px;flex-wrap:wrap}.view-title{font-size:16px;font-weight:700}.view-copy{font-size:11px;color:#64748b;margin-top:2px}.toolbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.filter{min-width:220px;max-width:380px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}.stat-card{padding:12px}.stat-k{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em}.stat-v{font-size:20px;font-weight:700;margin-top:2px;color:var(--navy)}.stat-sub{font-size:10px;color:#64748b;margin-top:1px}
+body.dark .stat-v{color:var(--accent)}
+.grid2{display:grid;grid-template-columns:1.15fr .85fr;gap:12px}.panel{padding:14px}.panel-title{font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}.kv{display:grid;grid-template-columns:140px 1fr;gap:6px;font-size:11px}.kv div:nth-child(odd){color:#64748b}.kv div:nth-child(even){overflow-wrap:anywhere}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:6px;background:#fff}table{width:100%;border-collapse:collapse;font-size:11px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap}th{background:#f8fafc;color:#64748b;font-size:10px;font-weight:700;position:sticky;top:0;z-index:1;text-transform:uppercase;letter-spacing:0.04em}tbody tr:hover{background:#f8fafc}.empty{padding:24px;color:#64748b;text-align:center;font-size:12px}
+.tag{display:inline-block;border:1px solid #cbd5e1;background:#f8fafc;padding:2px 6px;border-radius:4px;font-size:9.5px;font-weight:600}.ok{color:#166534;background:#f0fdf4;border-color:#bbf7d0}.warn{color:#a16207;background:#fffbeb;border-color:#fde68a}.bad{color:#b91c1c;background:#fef2f2;border-color:#fecaca}.info{color:#0369a1;background:#f0f9ff;border-color:#bae6fd}
+.pathbar{display:flex;gap:7px;margin-bottom:9px}.file-inspector{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:12px}.preview-box{border:1px solid var(--line);border-radius:6px;background:#f8fafc;padding:12px;min-height:160px;overflow:auto}.preview-image{display:block;max-width:100%;max-height:360px;margin:0 auto;border:1px solid #cbd5e1;border-radius:6px;object-fit:contain;background:#fff}.preview-pdf{width:100%;height:500px;border:1px solid #cbd5e1;border-radius:6px;background:#fff}.office-preview{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:16px;min-height:200px}.office-preview h4{font-size:12px;font-weight:700;margin:0 0 8px}.office-preview .office-text{white-space:pre-wrap;word-break:break-word;font:11.5px/1.6 Inter,system-ui;color:#1e293b}.process-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.process-detail-list{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:8px;font:10px/1.5 "JetBrains Mono";background:#f8fafc}@media(max-width:800px){.process-detail-grid{grid-template-columns:1fr}}.preview-text{white-space:pre-wrap;word-break:break-word;font:11px/1.5 "JetBrains Mono",monospace;color:#334155}.archive-list{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:6px}.archive-list table{font-size:10px}.archive-list td,.archive-list th{padding:6px}.archive-list tr.selected{background:#eff6ff}.archive-empty{padding:16px;color:#64748b;font-size:11px;text-align:center}
+body.dark .preview-box{background:#0f172a}body.dark .preview-text{color:#cbd5e1}body.dark .preview-image{background:#111827;border-color:#334155}body.dark .archive-list tr.selected{background:#172554}.pathbar .input{font-family:"JetBrains Mono";font-size:11px}.file-row{cursor:pointer}.file-row:hover{background:#eff6ff}.folder{color:#1e3a8a}.deleted{background:#fff7ed}
+.modal-back{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}.modal-back.open{display:flex}.modal{width:min(1050px,96vw);max-height:92vh;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 20px 50px rgba(15,23,42,.2)}.modal-head{position:sticky;top:0;z-index:2;background:#fff;border-bottom:1px solid var(--line);padding:11px 15px;display:flex;justify-content:space-between;align-items:center}.modal-title{font-size:13px;font-weight:700}.modal-body{padding:14px}.close{border:0;background:#f8fafc;border-radius:5px;width:28px;height:28px;cursor:pointer;color:#475569}.close:hover{background:#e2e8f0}
+.hex{font:11px/1.5 "JetBrains Mono";background:#0f172a;color:#cbd5e1;padding:12px;border-radius:6px;overflow:auto;max-height:420px}.hex .off{color:#60a5fa}.hex .bytes{color:#e2e8f0}.hex .ascii{color:#86efac}
+.log{font:11px/1.55 "JetBrains Mono";background:#0f172a;color:#cbd5e1;padding:12px;border-radius:6px;max-height:450px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.toast{position:fixed;right:18px;bottom:18px;z-index:80;background:#0f172a;color:#fff;padding:9px 13px;border-radius:6px;font-size:11px;box-shadow:0 8px 25px rgba(15,23,42,.2);display:none}.toast.show{display:block}
+.pagination-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-top:1px solid var(--line);background:#fff;font-size:11px}.engine-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:620px;overflow:auto;padding-right:2px}.engine-card{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:10px;border:1px solid #dbe3ee;border-radius:7px;background:#fff;min-height:72px}.engine-card:hover{border-color:#93c5fd;background:#f8fbff}.engine-card .engine-main{min-width:0}.engine-card .engine-name{font-size:11px;font-weight:700;color:#0f172a;line-height:1.35}.engine-card .engine-desc{font-size:9.5px;color:#64748b;line-height:1.35;margin-top:3px}.engine-card .engine-icon{width:28px;height:28px;border-radius:6px;background:#eff6ff;display:grid;place-items:center;flex:none}.engine-card .engine-status{flex:none;max-width:110px;text-align:center}.plain-note{padding:10px 12px;border:1px solid #dbeafe;background:#eff6ff;border-radius:7px;color:#1e3a8a;font-size:11px;line-height:1.45;margin-bottom:10px}.plain-note strong{color:#172554}.timestamp{white-space:nowrap}.detail-grid{display:grid;grid-template-columns:150px 1fr;gap:7px;font-size:11px}.detail-grid>div:nth-child(odd){color:#64748b;font-weight:600}.detail-grid>div:nth-child(even){overflow-wrap:anywhere}.archive-members{margin-top:12px}.archive-member{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border-bottom:1px solid #e2e8f0;font-size:11px}.archive-member:last-child{border-bottom:0}.archive-member:hover{background:#f8fafc}.file-type-icon{width:18px;text-align:center;color:#64748b}.investigation-chip{font-size:9px;padding:3px 6px;border-radius:4px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;font-weight:600}@media(max-width:900px){.engine-grid{grid-template-columns:1fr}}
+body.dark .pagination-bar{background:#111827;border-color:#1e293b}
+.tab-btn{padding:6px 12px;font-size:11px;font-weight:600;border-bottom:2px solid transparent;color:#64748b;cursor:pointer}
+.tab-btn.active{color:#1e3a8a;border-bottom-color:#1e3a8a}
+body.dark .tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8}
+@media(max-width:1050px){.case-banner{grid-template-columns:repeat(3,1fr)}.grid2{grid-template-columns:1fr}}
+@media(max-width:800px){.layout{grid-template-columns:1fr}.sidebar{position:relative;top:0;height:auto;border-right:0;border-bottom:1px solid var(--line);display:flex;overflow:auto;gap:4px;padding:6px}.nav-label{display:none}.nav-item{min-width:max-content}.workspace{padding:12px}}
+</style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+
+<!-- AUTHENTICATION PAGE -->
+<section id="authPage" class="page fadeIn">
+  <div class="classification">AUTHORIZED LAW ENFORCEMENT &amp; DEFENSIVE DFIR TRIAGE ONLY</div>
+  <header class="gov-header">
+    <div class="gov-inner">
+      <div class="agency-mark">
+        <div class="agency-seal"><i class="fa-solid fa-shield-halved"></i></div>
+        <div><div class="agency-name">DIGITAL FORENSICS &amp; INCIDENT RESPONSE GATEWAY</div><div class="agency-sub">JOCKY INVESTIGATIVE PLATFORM · DEFENSIVE ENDPOINT TRIAGE</div></div>
+      </div>
+      <div class="security-badge"><i class="fa-solid fa-lock"></i> SECURE SESSION</div>
+    </div>
+  </header>
+  <main class="auth-wrap">
+    <div class="auth-card card slideUp">
+      <div class="p-6">
+        <div class="mb-5"><div class="auth-title">Investigator Authentication</div><div class="auth-copy mt-2">Authenticate to access the case intake &amp; evidence dashboard. Real local defensive forensic artifacts are cryptographically hashed and audit-verified.</div></div>
+        <form id="authForm" class="space-y-4">
+          <div><label class="label required">Investigator Badge ID / Username</label><input id="authUser" class="input" placeholder="INV-9042-FED" value="INV-9042-FED" autocomplete="username" required></div>
+          <div><label class="label required">Security Passphrase / Password</label><input id="authPass" type="password" class="input" placeholder="Enter security passphrase" value="JOCKY-DFIR-2026" autocomplete="current-password" required></div>
+          <div><label class="label required">6-Digit MFA / OTP Token Key</label><input id="authOtp" class="input mono" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="000000" value="000000" required></div>
+          <button class="btn btn-primary w-full" type="submit"><i class="fa-solid fa-arrow-right-to-bracket"></i> Authenticate &amp; Access Gateway</button>
+          <div id="authError" class="text-xs text-red-700 hiddenx"></div>
+        </form>
+      </div>
+      <div class="crypto-foot"><span><i class="fa-solid fa-shield-halved"></i> TLS SESSION · DEFENSIVE DFIR ONLY</span><span class="mono">JOCKY DFIR v5.2</span></div>
+    </div>
+  </main>
+</section>
+
+<!-- CASE INTAKE / SELECTION PAGE -->
+<section id="intakePage" class="page hiddenx">
+  <div class="classification">AUTHORIZED LAW ENFORCEMENT &amp; OFFICIAL USE ONLY</div>
+  <header class="gov-header"><div class="gov-inner">
+    <div class="agency-mark"><div class="agency-seal"><i class="fa-solid fa-fingerprint"></i></div><div><div class="agency-name">CASE INTAKE &amp; SCOPING</div><div class="agency-sub">OPEN EXISTING CASE OR SCOPE NEW FORENSIC ACQUISITION</div></div></div>
+    <div class="security-badge"><i class="fa-solid fa-file-shield"></i> EVIDENCE CONTROL</div>
+  </div></header>
+  <main class="intake-wrap">
+    <div class="stepbar"><div class="step done"><span class="n">1</span> Authentication</div><div class="step-line"></div><div class="step active"><span class="n">2</span> Case Scoping</div><div class="step-line"></div><div class="step"><span class="n">3</span> Investigation Dashboard</div></div>
+    
+    <!-- Existing Cases Banner -->
+    <div id="existingCasesBox" class="card p-4 mb-5 hiddenx">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-bold text-sm text-slate-800"><i class="fa-solid fa-folder-open text-blue-700 mr-2"></i>Active Forensic Cases in Database</div>
+        <span class="tag info">Existing Evidence Available</span>
+      </div>
+      <div id="existingCasesList" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+    </div>
+
+    <div class="mb-4"><div class="section-title">New Case Intake &amp; Scoping</div><div class="section-copy">Define operational metadata before collection or triage telemetry is inspected.</div></div>
+    <form id="caseForm" class="card p-5">
+      <div class="form-grid">
+        <div><label class="label required">Case Tracking ID</label><div class="flex gap-2"><input id="caseTracking" class="input mono bg-slate-50" readonly><button id="copyCase" type="button" class="btn btn-sm" title="Copy to clipboard"><i class="fa-regular fa-copy"></i></button></div></div>
+        <div><label class="label required">Start Date &amp; Time (UTC)</label><input id="startTime" type="datetime-local" class="input" required></div>
+        <div><label class="label required">Investigator Name &amp; Badge</label><input id="investigator" class="input" placeholder="Full name · INV-9042-FED" value="" required></div>
+        <div><label class="label required">Authorizing Person / Warrant Reference</label><input id="authorizer" class="input" placeholder="Judge / official · warrant ref." value="" required></div>
+        <div><label class="label required">Client / Organization</label><input id="organization" class="input" placeholder="Agency or organization" value="Digital Forensics Unit" required></div>
+        <div><label class="label required">Evidence Custodian Details</label><input id="custodian" class="input" placeholder="Custodian · vault location" value="Chief Forensics Officer" required></div>
+        <div><label class="label required">Case Status</label><select id="status" class="select" required><option>Active / Under Investigation</option><option>Pending Review</option><option>On Hold</option><option>Closed / Archived</option></select></div>
+        <div><label class="label required">Case Severity</label><select id="severity" class="select" required><option>Critical</option><option>High</option><option selected>Medium</option><option>Low</option></select></div>
+        <div class="field-full"><label class="label required">Operation Title / Case Name</label><input id="caseName" class="input" placeholder="Concise operational reference name" value="Local Host Defensive Forensics" required></div>
+        <div class="field-full"><label class="label required">Subject Explanation / Case Scope</label><textarea id="scope" class="textarea" placeholder="Describe the authorized scope, subject systems, evidence boundaries and investigation rationale." required>Comprehensive local host digital forensics triage covering browser artifacts, installed software, processes, communication metadata, web activity, peripherals, and filesystem.</textarea></div>
+        <div class="field-full">
+          <label class="label required">Target Operating Environment</label>
+          <div class="os-grid">
+            <button type="button" id="osWindows" class="os-card selected" data-os="Windows"><div class="os-icon"><i class="fa-brands fa-windows"></i></div><div class="font-semibold text-sm">Windows Environment</div><div class="text-xs text-slate-500 mt-1">Registry, UserAssist, Prefetch, NTFS, Event Logs, Windows USB &amp; Wi-Fi profiles.</div></button>
+            <button type="button" id="osLinux" class="os-card" data-os="Linux"><div class="os-icon"><i class="fa-brands fa-linux"></i></div><div class="font-semibold text-sm">Linux Environment</div><div class="text-xs text-slate-500 mt-1">POSIX filesystem, /proc &amp; /sys telemetry, systemd logs, Linux audit artifacts.</div></button>
+          </div>
+          <input id="targetOs" type="hidden" value="Windows" required>
+        </div>
+      </div>
+      <div class="border-t border-slate-200 mt-5 pt-4 flex items-center justify-between gap-3 flex-wrap">
+        <div class="text-[11px] text-slate-500"><i class="fa-solid fa-circle-info"></i> All evidence ingested will be cryptographically bound to this Case ID.</div>
+        <button class="btn btn-primary" type="submit"><i class="fa-solid fa-lock"></i> Initialize Case Dashboard</button>
+      </div>
+    </form>
+  </main>
+</section>
+
+<!-- MAIN FORENSIC DASHBOARD -->
+<section id="dashboardPage" class="page hiddenx app-shell">
+  <header class="topbar">
+    <div class="agency-mark">
+      <div class="agency-seal" style="width:34px;height:34px;font-size:14px"><i class="fa-solid fa-shield-halved"></i></div>
+      <div><div class="brand-small">JOCKY DFIR Gateway</div><div class="text-[9px] text-slate-500 uppercase tracking-wider">Digital Forensics &amp; Incident Response</div></div>
+    </div>
+    <div class="top-meta">
+      <div class="flex items-center gap-1">
+        <span class="text-[11px] text-slate-500 font-semibold">Case:</span>
+        <select id="caseSelector" class="select py-1 text-xs mono w-auto font-bold" onchange="switchCase(this.value)"></select>
+      </div>
+      <span id="lockedOs" class="lock"><i class="fa-solid fa-lock"></i> TARGET LOCKED</span>
+      <button id="manualRefresh" class="theme-toggle refresh-toggle" title="Refresh current forensic data" aria-label="Refresh forensic data"><i class="fa-solid fa-rotate"></i></button>
+      <button id="themeToggle" class="theme-toggle" title="Switch light/dark mode" aria-label="Switch mode"><i class="fa-solid fa-moon moon"></i><i class="fa-solid fa-sun sun"></i></button>
+      <button id="quickReportBtn" class="btn btn-sm btn-primary" onclick="setView('reports')"><i class="fa-solid fa-file-export"></i> Reports</button>
+      <button id="logoutBtn" class="btn btn-sm"><i class="fa-solid fa-right-from-bracket"></i><span class="hide-sm">Exit</span></button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="nav-label">CASE</div>
+      <button class="nav-item active" data-view="overview"><i class="fa-solid fa-chart-pie"></i> Case Overview</button>
+      <button class="nav-item" data-view="timeline"><i class="fa-solid fa-clock-rotate-left"></i> Unified Timeline</button>
+      <button class="nav-item" data-view="findings"><i class="fa-solid fa-triangle-exclamation"></i> Findings &amp; MITRE</button>
+
+      <div class="nav-label">ARTIFACTS</div>
+      <button class="nav-item" data-view="browser"><i class="fa-solid fa-globe"></i> Browser Forensics</button>
+      <button class="nav-item" data-view="applications"><i class="fa-solid fa-cubes"></i> Application Forensics</button>
+      <button class="nav-item" data-view="messaging"><i class="fa-solid fa-comments"></i> Messaging Forensics</button>
+      <button class="nav-item" data-view="email" data-cat="email"><i class="fa-solid fa-envelope"></i> Email Forensics</button>
+      <button class="nav-item" data-view="web_activity"><i class="fa-solid fa-compass"></i> Web &amp; Social Activity</button>
+      <button class="nav-item" data-view="devices" data-cat="removable_media"><i class="fa-solid fa-plug"></i> Device &amp; Peripherals</button>
+      <button class="nav-item" data-view="filesystem"><i class="fa-solid fa-folder-tree"></i> Filesystem Artifacts</button>
+
+      <div class="nav-label">SYSTEM</div>
+      <button class="nav-item" data-view="system"><i class="fa-solid fa-microchip"></i> System Specifications</button>
+      <button class="nav-item" data-view="processes"><i class="fa-solid fa-memory"></i> Running Processes</button>
+      <button class="nav-item" data-view="network"><i class="fa-solid fa-network-wired"></i> Network Forensics</button>
+      <button class="nav-item" data-view="logs"><i class="fa-solid fa-file-waveform"></i> System Logs &amp; Audit</button>
+      <button class="nav-item" data-view="live"><i class="fa-solid fa-satellite-dish"></i> Live Monitoring</button>
+
+      <div class="nav-label">EVIDENCE</div>
+      <button class="nav-item" data-view="evidence"><i class="fa-solid fa-box"></i> Evidence Explorer</button>
+      <button class="nav-item" data-view="hashes"><i class="fa-solid fa-hashtag"></i> Hash Verification</button>
+      <button class="nav-item" data-view="archive"><i class="fa-solid fa-box-archive"></i> Archive &amp; Inspector</button>
+
+      <div class="nav-label">REPORTING</div>
+      <button class="nav-item" data-view="reports"><i class="fa-solid fa-file-lines"></i> Reports &amp; Export</button>
+
+      <div class="border-t border-slate-200 dark:border-slate-800 mt-4 pt-3">
+        <button id="rescopeBtn" class="nav-item text-xs text-slate-500"><i class="fa-solid fa-rotate"></i> Change / Scope Case</button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <div id="caseBanner" class="case-banner"></div>
+      <div id="viewRoot" class="fadeIn"></div>
+    </main>
+  </div>
+</section>
+
+<!-- MODAL DIALOG -->
+<div id="modalBack" class="modal-back" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <div id="modalTitle" class="modal-title font-bold text-slate-800 dark:text-slate-100">Forensic Details</div>
+      <button class="close" onclick="closeModal()" aria-label="Close modal"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="modalBody" class="modal-body"></div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const state={
+  caseId: 'CASE-001',
+  case: null,
+  casesList: [],
+  device: null,
+  deviceId: null,
+  os: 'Unknown',
+  view: 'overview',
+  filter: '',
+  page: 1,
+  limit: 50,
+  totalPages: 1,
+  subTab: '',
+  filePath: '/',
+  fileHistory: [],
+  networkSamples: []
+};
+
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800)}
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function fmt(v){return v===null||v===undefined||v===''?'—':escapeHtml(v)}
+function formatUtc(v){if(!v)return '—';const d=new Date(v);if(Number.isNaN(d.getTime()))return fmt(v);const ms=String(d.getUTCMilliseconds()).padStart(3,'0');return `${String(d.getUTCDate()).padStart(2,'0')} ${d.toLocaleString('en-US',{month:'short',timeZone:'UTC'})} ${d.getUTCFullYear()} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}.${ms} UTC`;}
+function cleanLogMessage(v){let x=String(v??'');x=x.replace(/^\d{4}-\d{2}-\d{2}T[^ ]+\s+/,'');x=x.replace(/^localhost\s+/i,'');return x;}
+function rootPathForTarget(){return String(state.os||'').toLowerCase().includes('windows')?'C:\\':'/'}
+function deviceId(){return state.deviceId||state.device?.id||''}
+function mono(v){return `<span class="mono">${fmt(v)}</span>`}
+function setPage(id){['authPage','intakePage','dashboardPage'].forEach(x=>$('#'+x).classList.toggle('hiddenx',x!==id))}
+function nowLocalInput(){const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)}
+function newCaseId(){return 'CASE-'+new Date().getFullYear()+'-'+Math.random().toString(36).slice(2,6).toUpperCase()}
+
+async function api(url,opt={}){
+  const r=await fetch(url,{credentials:'same-origin',...opt});
+  let data=null;
+  try{data=await r.json()}catch{data=await r.text()}
+  if(!r.ok)throw new Error(data?.error||data?.message||`HTTP ${r.status}`);
+  return data;
+}
+
+function openModal(title,body){$('#modalTitle').textContent=title;$('#modalBody').innerHTML=body;$('#modalBack').classList.add('open')}
+function closeModal(){$('#modalBack').classList.remove('open')}
+window.closeModal=closeModal;
+
+function setView(view, resetPage=true){
+  state.view=view;
+  if(resetPage) { state.page=1; state.filter=''; }
+  $$('.nav-item[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  renderView();
+}
+
+function renderCaseBanner(){
+  const c=state.case||{};
+  const sev=String(c.severity||'Medium').toLowerCase();
+  const targetOs=state.os||c.target_os||'Unknown';
+  const host=state.device?.hostname||state.device?.name||'Endpoint';
+  $('#caseBanner').innerHTML=`
+    <div class="case-cell"><div class="k">Case ID &amp; Operation</div><div class="v font-bold mono text-blue-700 dark:text-blue-400">${fmt(state.caseId)} · ${fmt(c.name||'Investigation')}</div></div>
+    <div class="case-cell"><div class="k">Investigator</div><div class="v">${fmt(c.investigator_name||c.investigator||'Lead DFIR Agent')}</div></div>
+    <div class="case-cell"><div class="k">Target Host / Specs</div><div class="v mono">${fmt(host)} · ${fmt(targetOs)}</div></div>
+    <div class="case-cell"><div class="k">Warrant / Auth Ref</div><div class="v">${fmt(c.authorization_ref||c.authorizer||'Standard Official Custody')}</div></div>
+    <div class="case-cell"><div class="k">Status / Severity</div><div class="v">${fmt(c.status||'ACTIVE')} · <span class="severity sev-${sev}">${fmt(c.severity||'Medium')}</span></div></div>
+  `;
+  $('#lockedOs').innerHTML=`<i class="fa-solid fa-shield-halved"></i> ${String(targetOs).toUpperCase()} DFIR ACTIVE`;
+}
+
+function simpleExplain(title){
+  const t=String(title).toLowerCase();
+  if(t.includes('browser'))return 'Shows websites, downloads and bookmarks found on the target computer.';
+  if(t.includes('messaging'))return 'Shows communication-app metadata found locally; no passwords or session tokens are collected.';
+  if(t.includes('email'))return 'Shows locally available mail headers, senders, recipients, subjects and attachments.';
+  if(t.includes('web &amp; social')||t.includes('web & social'))return 'Groups browser visits into recognizable websites and social platforms for easier review.';
+  if(t.includes('device'))return 'Shows connected or historically recorded USB, Bluetooth, network and storage devices.';
+  if(t.includes('filesystem')||t.includes('archive'))return 'Browse the target computer safely, inspect files, calculate hashes and preview supported formats.';
+  if(t.includes('system &amp; hardware')||t.includes('system & hardware'))return 'Shows what computer was examined: operating system, processor, memory and storage.';
+  if(t.includes('process'))return 'Shows programs running on the computer, who started them, where they run from and what they started.';
+  if(t.includes('network'))return 'Shows network connections and listening ports so an investigator can understand communication activity.';
+  if(t.includes('timeline'))return 'Puts events from different forensic sources into one chronological view.';
+  if(t.includes('logs'))return 'Shows endpoint and investigator events with the original evidence available for verification.';
+  if(t.includes('findings'))return 'Highlights correlated evidence and the ATT&amp;CK techniques associated with it.';
+  return 'This screen displays evidence collected from the selected endpoint and case.';
+}
+function head(title,copy,extra=''){
+  return `<div class="view-head"><div><div class="view-title">${title}</div><div class="view-copy">${copy}</div></div><div class="toolbar">${extra}</div></div><div class="plain-note"><strong>In simple terms:</strong> ${simpleExplain(title)}</div>`;
+}
+
+function paginationBar(total, count){
+  const from = total > 0 ? (state.page - 1) * state.limit + 1 : 0;
+  const to = Math.min(state.page * state.limit, total);
+  return `
+    <div class="pagination-bar">
+      <div>Showing <span class="font-bold">${from}</span> to <span class="font-bold">${to}</span> of <span class="font-bold">${total.toLocaleString()}</span> records</div>
+      <div class="flex items-center gap-2">
+        <select class="select py-0.5 px-2 text-xs w-auto" onchange="changeLimit(this.value)">
+          <option value="25" ${state.limit===25?'selected':''}>25 / page</option>
+          <option value="50" ${state.limit===50?'selected':''}>50 / page</option>
+          <option value="100" ${state.limit===100?'selected':''}>100 / page</option>
+        </select>
+        <button class="btn btn-sm" onclick="prevPage()" ${state.page<=1?'disabled':''}><i class="fa-solid fa-chevron-left"></i> Prev</button>
+        <span class="mono px-1">Page ${state.page} / ${Math.max(1, state.totalPages)}</span>
+        <button class="btn btn-sm" onclick="nextPage()" ${state.page>=state.totalPages?'disabled':''}><i class="fa-solid fa-chevron-right"></i> Next</button>
+      </div>
+    </div>
+  `;
+}
+
+window.prevPage=()=>{ if(state.page > 1){ state.page--; renderView(); } };
+window.nextPage=()=>{ if(state.page < state.totalPages){ state.page++; renderView(); } };
+window.changeLimit=lim=>{ state.limit=parseInt(lim,10); state.page=1; renderView(); };
+
+function filterBar(placeholder='Search records…'){
+  return `<input id="universalFilter" class="input filter" placeholder="${placeholder}" value="${escapeHtml(state.filter)}" onkeydown="if(event.key==='Enter')applySearch(this.value)">
+  <button class="btn btn-sm btn-primary" onclick="applySearch($('#universalFilter').value)"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+  ${state.filter?`<button class="btn btn-sm" onclick="applySearch('')"><i class="fa-solid fa-xmark"></i> Clear</button>`:''}`;
+}
+window.applySearch=q=>{ state.filter=q; state.page=1; renderView(); };
+
+function table(headers,rows,empty='No forensic records returned.'){
+  if(!rows?.length)return `<div class="empty">${empty}</div>`;
+  return `<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+}
+
+// ─── VIEW RENDERERS ──────────────────────────────────────────────────────────
+
+async function renderView(){
+  const root=$('#viewRoot');
+  root.innerHTML='<div class="card p-8 text-center text-slate-500 text-sm"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Loading normalized forensic evidence…</div>';
+  try{
+    switch(state.view){
+      case 'overview': await renderOverview(); break;
+      case 'timeline': await renderTimeline(); break;
+      case 'findings': await renderFindings(); break;
+      case 'browser': await renderBrowser(); break;
+      case 'applications': await renderApplications(); break;
+      case 'messaging': await renderMessaging(); break;
+      case 'email': await renderEmail(); break;
+      case 'web_activity': await renderWebActivity(); break;
+      case 'devices': await renderDevices(); break;
+      case 'filesystem': await renderFilesystem(); break;
+      case 'system': await renderSystem(); break;
+      case 'processes': await renderProcesses(); break;
+      case 'network': await renderNetwork(); break;
+      case 'logs': await renderLogs(); break;
+      case 'live': await renderLive(); break;
+      case 'evidence': await renderEvidence(); break;
+      case 'hashes': await renderHashes(); break;
+      case 'archive': await renderArchive(); break;
+      case 'reports': await renderReports(); break;
+      default: await renderOverview();
+    }
+  }catch(e){
+    root.innerHTML=`<div class="card p-6 border-red-200 bg-red-50 dark:bg-red-950/20"><div class="font-bold text-red-800 dark:text-red-400 mb-2"><i class="fa-solid fa-triangle-exclamation mr-1"></i> View error: ${escapeHtml(e.message)}</div><div class="text-xs text-slate-500">Ensure the JOCKY DFIR Server is running and jocky_forensics.db contains collected records.</div><button class="btn btn-sm mt-3" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Retry</button></div>`;
+  }
+}
+
+// 1. CASE OVERVIEW
+async function renderOverview(){
+  const d = await api(`/api/case/overview?case_id=${encodeURIComponent(state.caseId)}`);
+  const counts = d.counts || {};
+  const run = d.latest_run || {};
+  const host = d.host || {};
+  state.deviceId=d.device_id||state.deviceId;
+  state.device={id:state.deviceId,hostname:host.hostname,os:host.os_name||host.operating_system};
+  if(host.os_name||host.operating_system) state.os=host.os_name||host.operating_system;
+  renderCaseBanner();
+
+  const totalCollected = (counts.browser_records||0) + (counts.applications||0) + (counts.processes||0) + (counts.files||0) + (counts.device_artifacts||0) + (counts.network_events||0) + (counts.web_activity||0);
+
+  let runSummary = {};
+  if(run.summary_json){
+    try{ runSummary = JSON.parse(run.summary_json); }catch{}
+  }
+  const modules = runSummary.modules || {};
+  let recentDevices = [], recentActivity = [];
+  try{
+    const [dev,timeline] = await Promise.all([
+      api(`/api/devices/artifacts?case_id=${encodeURIComponent(state.caseId)}&page=1&limit=5`),
+      api(`/api/cases/${encodeURIComponent(state.caseId)}/timeline`)
+    ]);
+    recentDevices = (dev.items||[]).slice(0,5);
+    recentActivity = (timeline.timeline||[]).slice(0,5);
+  }catch(e){}
+
+  $('#viewRoot').innerHTML = head('Case Overview &amp; Triage Metrics', `Case: ${state.caseId} · Defensive DFIR acquisition status: ${d.status}`, `<button class="btn btn-sm btn-primary" onclick="setView('reports')"><i class="fa-solid fa-download"></i> Export Reports</button><button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>`) +
+  `
+  <div class="stats">
+    <div class="card stat-card"><div class="stat-k">Total Artifacts</div><div class="stat-v">${totalCollected.toLocaleString()}</div><div class="stat-sub">Endpoint telemetry received</div></div>
+    <div class="card stat-card"><div class="stat-k">Browser History &amp; DLs</div><div class="stat-v">${((counts.browser_records||0)+(counts.browser_downloads||0)).toLocaleString()}</div><div class="stat-sub">Observed endpoint browser records</div></div>
+    <div class="card stat-card"><div class="stat-k">Applications &amp; Execs</div><div class="stat-v">${(counts.applications||0).toLocaleString()}</div><div class="stat-sub">Registry &amp; UserAssist</div></div>
+    <div class="card stat-card"><div class="stat-k">Running Processes</div><div class="stat-v">${(counts.processes||0).toLocaleString()}</div><div class="stat-sub">SHA-256 Hashed</div></div>
+    <div class="card stat-card"><div class="stat-k">Hardware &amp; Devices</div><div class="stat-v">${(counts.device_artifacts||0).toLocaleString()}</div><div class="stat-sub">USB, BT, Adapters, Wi-Fi</div></div>
+    <div class="card stat-card"><div class="stat-k">Network Sockets</div><div class="stat-v">${(counts.network_events||0).toLocaleString()}</div><div class="stat-sub">Connections &amp; Listeners</div></div>
+    <div class="card stat-card"><div class="stat-k">Timeline Events</div><div class="stat-v">${(counts.timeline_events||0).toLocaleString()}</div><div class="stat-sub">Unified Chronological</div></div>
+    <div class="card stat-card"><div class="stat-k">Findings &amp; IOCs</div><div class="stat-v text-red-600">${(counts.findings||0).toLocaleString()}</div><div class="stat-sub">Correlated MITRE ATT&amp;CK</div></div>
+  </div>
+
+  <div class="grid2">
+    <!-- Left panel: Host & Collection run -->
+    <div class="card panel">
+      <div class="panel-title"><span><i class="fa-solid fa-server mr-1"></i> Target Host Acquisition Profile</span><span class="tag ${host.hostname?"ok":"info"}">${host.hostname?"COLLECTED":"NO DATA RECEIVED"}</span></div>
+      <div class="kv">
+        <div>Hostname</div><div class="font-bold mono">${fmt(host.hostname)}</div>
+        <div>Operating System</div><div>${fmt(host.os_name||host.operating_system)}</div>
+        <div>Build / Release</div><div class="mono">${fmt(host.os_release||host.build)}</div>
+        <div>Processor / Architecture</div><div>${fmt(host.cpu_name||host.cpu)} (${fmt(host.architecture)})</div>
+        <div>Physical / Logical Cores</div><div>${fmt(host.cpu_physical_cores||host.cpu_cores)}</div>
+        <div>Total Installed RAM</div><div>${fmt(host.ram_total_gb||host.ram)}</div>
+        <div>System Boot Time</div><div class="mono text-xs">${fmt(host.boot_time||'—')}</div>
+        <div>Uptime</div><div>${host.uptime_seconds ? `${Math.round(host.uptime_seconds/3600)} hours` : '—'}</div>
+        <div>Collection Run ID</div><div class="mono text-xs text-blue-700 dark:text-blue-400">${fmt(run.id)}</div>
+        <div>Run Duration</div><div>${run.start_time&&run.end_time ? `${Math.round((new Date(run.end_time)-new Date(run.start_time))/1000)} seconds` : '—'}</div>
+      </div>
+    </div>
+
+    <!-- Right panel: B1-B12 Module Checklist -->
+    <div class="card panel">
+      <div class="panel-title"><span><i class="fa-solid fa-list-check mr-1"></i> B1–B12 Forensic Engine Status</span><span class="mono text-[10px] text-slate-500">${fmt(run.collector_version)}</span></div>
+      <div class="engine-grid mt-2">
+        ${[
+          ['B1','fa-globe','Browser Forensics','History, downloads, bookmarks',counts.browser_records||0,counts.browser_records?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B2','fa-cubes','Application Forensics','Installed apps and execution evidence',counts.applications||0,counts.applications?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B3','fa-comments','Messaging Forensics','Chat metadata and local stores',counts.messages||0,counts.messages?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B4','fa-envelope','Email Forensics','Mail stores and RFC-822 metadata',counts.email_messages||0,counts.email_messages?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B5','fa-compass','Web & Social Activity','Platforms and observed domains',counts.web_activity||0,counts.web_activity?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B6','fa-plug','Device & Hardware','USB, Bluetooth, adapters, Wi-Fi',counts.device_artifacts||0,counts.device_artifacts?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B7','fa-microchip','System Specifications','OS, CPU, memory, storage',host.hostname?1:0,host.hostname?'COLLECTED':'NO DATA RECEIVED'],
+          ['B8','fa-folder-tree','Filesystem Forensics','Files, metadata and hashes',counts.files||0,counts.files?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B9','fa-satellite-dish','Live Monitoring','Processes, sockets and timeline',counts.timeline_events||0,counts.timeline_events?'COLLECTED':'NO EVIDENCE FOUND'],
+          ['B10','fa-box-archive','Evidence Packaging','Manifest and evidence package',run.id?1:0,run.id?'GENERATED':'NOT GENERATED'],
+          ['B11','fa-fingerprint','Integrity & Hash Verification','SHA-256 verification and evidence integrity',counts.hashes||0,counts.hashes?'AVAILABLE':'READY'],
+          ['B12','fa-file-pdf','Forensic Reporting','PDF, HTML, JSON and evidence package',run.id?1:0,run.id?'AVAILABLE':'READY']
+        ].map(m=>`<div class="engine-card"><div class="engine-main"><div class="flex items-center gap-2"><span class="engine-icon"><i class="fa-solid ${m[1]} text-blue-600"></i></span><div class="engine-name">${m[0]} · ${m[2]}</div></div><div class="engine-desc">${m[3]}</div></div><span class="tag engine-status ${m[4]?'ok':'info'}">${m[5]}${m[4]&&typeof m[4]==='number'&&m[4]>1?` (${m[4].toLocaleString()})`:''}</span></div>`).join('')}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2 mt-4">
+    <div class="card panel">
+      <div class="panel-title">
+        <span><i class="fa-solid fa-plug mr-1"></i> LAST CONNECTED DEVICES</span>
+        <button class="btn btn-sm" onclick="setView('devices')">View All</button>
+      </div>
+      ${recentDevices.length ? table(
+        ['Device','Type','Status','Observed'],
+        recentDevices.map(dev=>`<tr><td class="font-bold">${fmt(dev.device_name)}</td><td>${fmt(dev.device_type)}</td><td>${fmt(dev.status)}</td><td class="mono text-xs">${formatUtc(dev.connection_time||dev.timestamp)}</td></tr>`).join(''),
+        'No endpoint telemetry received.'
+      ) : '<div class="empty-state">No endpoint telemetry received.</div>'}
+    </div>
+    <div class="card panel">
+      <div class="panel-title">
+        <span><i class="fa-solid fa-clock-rotate-left mr-1"></i> RECENT ACTIVITY</span>
+        <button class="btn btn-sm" onclick="setView('timeline')">View Timeline</button>
+      </div>
+      ${recentActivity.length ? table(
+        ['UTC','Category','Event','Source'],
+        recentActivity.map(ev=>`<tr><td class="mono text-xs">${formatUtc(ev.timestamp||ev.time)}</td><td>${fmt(ev.category||ev.type)}</td><td class="text-xs">${fmt(ev.description||ev.message||ev.event)}</td><td class="mono text-xs">${fmt(ev.source||ev.evidence_id)}</td></tr>`).join(''),
+        'No endpoint telemetry received.'
+      ) : '<div class="empty-state">No endpoint telemetry received.</div>'}
+    </div>
+  </div>
+  `;
+}
+
+// 2. TIMELINE
+async function renderTimeline(){
+  const url = `/api/timeline?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Unified Forensic Timeline', 'Chronological correlation across browser history, process spawns, network events, and live monitor.', filterBar('Search description, process, entity, endpoint…')) +
+  `<div class="card">` +
+  table(
+    ['Timestamp (UTC)', 'Severity', 'Category', 'Event Type', 'Source', 'Description', 'Process / Entity', 'Payload'],
+    items.map(e => `
+      <tr>
+        <td class="mono font-semibold text-xs timestamp">${formatUtc(e.timestamp)}</td>
+        <td><span class="severity sev-${String(e.severity||'info').toLowerCase()}">${fmt(e.severity||'INFO')}</span></td>
+        <td><span class="tag">${fmt(e.category)}</span></td>
+        <td class="font-bold text-xs">${fmt(e.event_type)}</td>
+        <td><code>${fmt(e.source)}</code></td>
+        <td class="max-w-[340px] overflow-hidden text-ellipsis">${fmt(e.description)}</td>
+        <td class="mono text-xs">${fmt(e.entity||e.process||e.network_endpoint||'—')}</td>
+        <td><button class="btn btn-sm" onclick='showEventDetails(${JSON.stringify(e).replace(/'/g,"&#39;")})'><i class="fa-solid fa-eye"></i> Details</button></td>
+      </tr>
+    `),
+    'No timeline events found for this filter.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 3. FINDINGS
+async function renderFindings(){
+  const d = await api(`/api/findings?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}`);
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Forensic Findings &amp; MITRE ATT&amp;CK Detections', 'Correlated indicators of compromise, policy violations, and suspicious endpoint activities.', `<button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>`) +
+  (items.length ? `
+    <div class="space-y-3">
+      ${items.map(f => `
+        <div class="card p-4 border-l-4 ${f.severity==='CRITICAL'?'border-l-red-600':f.severity==='HIGH'?'border-l-orange-500':'border-l-amber-500'}">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="severity sev-${String(f.severity||'medium').toLowerCase()}">${fmt(f.severity)}</span>
+                <span class="tag">${fmt(f.category)}</span>
+                <span class="font-bold text-sm text-slate-800 dark:text-slate-100">${fmt(f.title)}</span>
+              </div>
+              <div class="text-xs text-slate-600 dark:text-slate-300 mt-1">${fmt(f.description)}</div>
+              ${f.mitre_technique ? `<div class="mt-2 text-xs font-mono text-blue-700 dark:text-blue-400"><i class="fa-solid fa-crosshairs mr-1"></i>MITRE ATT&amp;CK: ${fmt(f.mitre_technique)}</div>` : ''}
+              ${f.recommendations ? `<div class="mt-2 p-2 rounded bg-amber-50 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-300"><i class="fa-solid fa-lightbulb mr-1"></i><strong>Remediation:</strong> ${fmt(f.recommendations)}</div>` : ''}
+            </div>
+            <span class="mono text-[10px] text-slate-400 whitespace-nowrap">${fmt(f.timestamp)}</span>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  ` : `<div class="card empty">No correlated suspicious findings recorded in this case.</div>`);
+}
+
+// 4. BROWSER FORENSICS
+async function renderBrowser(){
+  const tab = state.subTab || 'history';
+  let ep = `/api/browser/history?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  let headers = ['Browser', 'Profile', 'Domain', 'URL / Location', 'Title', 'Visit Count', 'Timestamp (UTC)'];
+  if(tab === 'downloads'){
+    ep = `/api/browser/downloads?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+    headers = ['Browser', 'Profile', 'Filename', 'Total Bytes', 'Target Path', 'Source URL', 'Timestamp'];
+  } else if(tab === 'bookmarks'){
+    ep = `/api/browser/bookmarks?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+    headers = ['Browser', 'Profile', 'Title', 'URL', 'Folder', 'Timestamp'];
+  }
+
+  const d = await api(ep);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Browser Forensics (B1)', 'History, downloads, and bookmarks safely extracted from locked browser profiles.', filterBar('Search URL, title, domain, filename…')) +
+  `
+  <div class="card mb-3 p-1 flex gap-2 border-b">
+    <button class="tab-btn ${tab==='history'?'active':''}" onclick="setBrowserTab('history')"><i class="fa-solid fa-clock-rotate-left mr-1"></i> History</button>
+    <button class="tab-btn ${tab==='downloads'?'active':''}" onclick="setBrowserTab('downloads')"><i class="fa-solid fa-download mr-1"></i> Downloads</button>
+    <button class="tab-btn ${tab==='bookmarks'?'active':''}" onclick="setBrowserTab('bookmarks')"><i class="fa-solid fa-bookmark mr-1"></i> Bookmarks</button>
+  </div>
+  <div class="card">
+  ` +
+  table(
+    headers,
+    items.map(r => {
+      if(tab === 'downloads'){
+        return `<tr><td class="font-bold">${fmt(r.browser)}</td><td>${fmt(r.profile)}</td><td class="font-bold text-xs">${fmt(r.filename)}</td><td class="mono">${r.total_bytes ? `${Math.round(r.total_bytes/1024)} KB` : '—'}</td><td class="mono text-xs max-w-[260px] overflow-hidden text-ellipsis">${fmt(r.target_path)}</td><td class="mono text-xs max-w-[260px] overflow-hidden text-ellipsis">${fmt(r.url)}</td><td class="mono text-xs">${formatUtc(r.timestamp)}</td></tr>`;
+      } else if(tab === 'bookmarks'){
+        return `<tr><td class="font-bold">${fmt(r.browser)}</td><td>${fmt(r.profile)}</td><td class="font-bold text-xs">${fmt(r.title)}</td><td class="mono text-xs max-w-[340px] overflow-hidden text-ellipsis">${fmt(r.url)}</td><td>${fmt(r.folder)}</td><td class="mono text-xs">${formatUtc(r.timestamp)}</td></tr>`;
+      } else {
+        return `<tr><td class="font-bold">${fmt(r.browser)}</td><td>${fmt(r.profile)}</td><td class="mono text-blue-700 dark:text-blue-400 font-semibold">${fmt(r.domain)}</td><td class="mono text-xs max-w-[320px] overflow-hidden text-ellipsis" title="${escapeHtml(r.url)}">${fmt(r.url)}</td><td class="max-w-[220px] overflow-hidden text-ellipsis">${fmt(r.title)}</td><td class="mono text-center font-bold">${fmt(r.visit_count)}</td><td class="mono text-xs">${formatUtc(r.timestamp)}</td></tr>`;
+      }
+    }),
+    'No browser records match this query.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+window.setBrowserTab=t=>{ state.subTab=t; state.page=1; renderBrowser(); };
+
+// 5. APPLICATION FORENSICS
+async function renderApplications(){
+  const url = `/api/applications?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Application Forensics (B2)', 'Installed software, UserAssist execution count, Recent files, Prefetch status, and Zone.Identifier ADS.', filterBar('Search application name, publisher, path…')) +
+  `<div class="card">` +
+  table(
+    ['Application Name', 'Publisher', 'Version', 'Install Date / Exec Count', 'Artifact Source', 'Install / Exec Path', 'Timestamp'],
+    items.map(a => `
+      <tr>
+        <td class="font-bold text-xs">${fmt(a.name)}</td>
+        <td>${fmt(a.publisher)}</td>
+        <td class="mono text-xs">${fmt(a.version)}</td>
+        <td class="mono text-xs">${fmt(a.install_date)}</td>
+        <td><span class="tag ${a.source==='userassist'?'info':a.source==='installed'?'ok':'warn'}">${fmt(a.source)}</span></td>
+        <td class="mono text-xs max-w-[360px] overflow-hidden text-ellipsis" title="${escapeHtml(a.install_path)}">${fmt(a.install_path)}</td>
+        <td class="mono text-xs">${fmt(a.timestamp)}</td>
+      </tr>
+    `),
+    'No application artifacts returned.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 6. MESSAGING FORENSICS
+async function renderMessaging(){
+  const d = await api(`/api/messaging?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+  const apps = d.apps || [];
+
+  $('#viewRoot').innerHTML = head('Messaging &amp; Communications Forensics (B3)', 'Metadata discovery across WhatsApp, Discord, Signal, Telegram, and chat client stores. Strictly defensive (no token theft).', filterBar('Search app name, sender, recipient, message snippet…')) +
+  (apps.length ? `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      ${apps.map(a => `
+        <div class="card p-3 flex items-center justify-between">
+          <div><div class="font-bold text-sm">${fmt(a.app_name)}</div><div class="text-[10px] text-slate-500">${a.count} message/store record(s)</div></div>
+          <span class="tag ${a.status==='COLLECTED'?'ok':'info'}">${fmt(a.status)}</span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '') +
+  `<div class="card">` +
+  table(
+    ['App Name', 'Sender', 'Recipient', 'Direction', 'Message Snippet / Store', 'Status', 'Timestamp'],
+    items.map(m => `
+      <tr>
+        <td class="font-bold"><i class="fa-solid fa-comment-dots mr-1 text-blue-600"></i>${fmt(m.app_name)}</td>
+        <td>${fmt(m.sender)}</td>
+        <td>${fmt(m.recipient)}</td>
+        <td><span class="tag">${fmt(m.direction)}</span></td>
+        <td class="mono text-xs max-w-[400px] overflow-hidden text-ellipsis">${fmt(m.text_snippet)}</td>
+        <td><span class="tag ${m.status==='COLLECTED'?'ok':'warn'}">${fmt(m.status)}</span></td>
+        <td class="mono text-xs timestamp">${formatUtc(m.timestamp)}</td>
+      </tr>
+    `),
+    'No messaging records found.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 7. EMAIL FORENSICS
+async function renderEmail(){
+  const d = await api(`/api/email?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  const clients=d.clients||[];
+  $('#viewRoot').innerHTML = head('Email Forensics (B4)', 'Local mail headers, mail stores and client presence. No password cracking or credential collection.', filterBar('Search subject, sender, recipient, body…')) +
+  (clients.length?`<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">${clients.map(c=>`<div class="card p-3"><div class="font-bold text-xs">${fmt(c.name)}</div><div class="text-[10px] text-slate-500 mt-1">${c.installed?'Detected on endpoint':'Not detected'}</div><span class="tag ${c.installed?'ok':'info'} mt-2">${fmt(c.status)}</span></div>`).join('')}</div>`:'') +
+  `<div class="card">` +
+  table(
+    ['Client', 'Sender (From)', 'Recipient (To)', 'Subject', 'Date', 'Attachments', 'Status'],
+    items.map(e => `
+      <tr>
+        <td class="font-bold">${fmt(e.client_name)}</td>
+        <td class="mono text-xs">${fmt(e.from_addr)}</td>
+        <td class="mono text-xs">${fmt(e.to_addr)}</td>
+        <td class="font-semibold text-xs">${fmt(e.subject)}</td>
+        <td class="mono text-xs">${formatUtc(e.date)}</td>
+        <td>${e.has_attachments ? '<span class="tag ok"><i class="fa-solid fa-paperclip"></i> Yes</span>' : '<span class="text-slate-400">None</span>'}</td>
+        <td><span class="tag ok">${fmt(e.status)}</span></td>
+      </tr>
+    `),
+    'No local email client stores (.pst, .ost, .mbox, .eml) contained unencrypted messages on this endpoint.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 8. WEB & SOCIAL ACTIVITY
+async function renderWebActivity(){
+  const url = `/api/web-activity?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Web &amp; Social Platform Intelligence (B5)', 'Aggregated online platforms, visit frequency, and observed login endpoints.', filterBar('Search platform, domain, evidence type…')) +
+  `<div class="card">` +
+  table(
+    ['Platform', 'Domain', 'Visit Count', 'Evidence Type', 'First Seen', 'Last Seen', 'Browser / Profile'],
+    items.map(w => `
+      <tr>
+        <td class="font-bold"><i class="fa-solid fa-arrow-up-right-from-square mr-1 text-sky-600"></i>${fmt(w.platform)}</td>
+        <td class="mono text-blue-700 dark:text-blue-400 font-semibold">${fmt(w.domain)}</td>
+        <td class="mono font-bold text-center">${fmt(w.visit_count)}</td>
+        <td><span class="tag ${w.evidence_type.includes('LOGIN')?'warn':'info'}">${fmt(w.evidence_type)}</span></td>
+        <td class="mono text-xs">${formatUtc(w.first_seen)}</td>
+        <td class="mono text-xs">${formatUtc(w.last_seen)}</td>
+        <td>${fmt(w.browser)} (${fmt(w.profile)})</td>
+      </tr>
+    `),
+    'No web activity mapped.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 9. DEVICES & HARDWARE
+async function renderDevices(){
+  const url = `/api/devices/artifacts?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+  const types = d.device_types || [];
+
+  $('#viewRoot').innerHTML = head('Device &amp; Hardware Forensics (B6)', 'Connected &amp; historical USB devices, Bluetooth peripherals, Network adapters, Wi-Fi profiles, and Printers.', filterBar('Search device name, vendor, serial, hardware ID…')) +
+  (types.length ? `
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
+      ${types.map(t => `
+        <div class="card p-2 text-center">
+          <div class="font-bold text-xs">${fmt(t.device_type)}</div>
+          <div class="stat-v text-sm">${t.count}</div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '') +
+  `<div class="card">` +
+  table(
+    ['Device Type', 'Device Name', 'Vendor / Product', 'Serial / MAC / Interface', 'Status', 'Connection Time / Observed', 'Hardware / Raw Reference'],
+    items.map(dev => `
+      <tr>
+        <td><span class="tag">${fmt(dev.device_type)}</span></td>
+        <td class="font-bold text-xs">${fmt(dev.device_name)}</td>
+        <td>${fmt(dev.vendor||'—')} / ${fmt(dev.product||'—')}</td>
+        <td class="mono text-xs">${fmt(dev.serial_number||dev.interface||dev.drive_letter||'—')}</td>
+        <td><span class="tag ${dev.status==='CONNECTED'?'ok':dev.status==='DISCONNECTED'?'warn':'info'}">${fmt(dev.status)}</span></td>
+        <td class="mono text-xs">${formatUtc(dev.connection_time||dev.timestamp)}</td>
+        <td class="mono text-xs max-w-[280px] overflow-hidden text-ellipsis">${fmt(dev.hardware_id||dev.raw_details||'—')}</td>
+      </tr>
+    `),
+    'No device artifacts returned.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 10. FILESYSTEM ARTIFACTS
+async function renderFilesystemArtifacts(){
+  const url = `/api/filesystem?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Filesystem Artifacts (B8)', 'Triaged user files, metadata, cryptographic SHA-256 hashes, and alternate data streams.', filterBar('Search filename, path, extension, hash…')) +
+  `<div class="card">` +
+  table(
+    ['Filename', 'Extension', 'Size', 'Created Time', 'Modified Time', 'Cryptographic SHA-256', 'Path', 'Inspect'],
+    items.map(f => `
+      <tr>
+        <td class="font-bold text-xs"><i class="fa-regular fa-file mr-1 text-slate-500"></i>${fmt(f.filename)}</td>
+        <td><span class="tag">${fmt(f.extension||'—')}</span></td>
+        <td class="mono text-xs">${f.size_bytes ? `${(f.size_bytes/1024).toFixed(1)} KB` : '0 B'}</td>
+        <td class="mono text-xs">${formatUtc(f.created_time)}</td>
+        <td class="mono text-xs">${formatUtc(f.modified_time)}</td>
+        <td class="mono text-xs max-w-[200px] overflow-hidden text-ellipsis">${fmt(f.sha256||'—')}</td>
+        <td class="mono text-xs max-w-[280px] overflow-hidden text-ellipsis" title="${escapeHtml(f.path)}">${fmt(f.path)}</td>
+        <td><button class="btn btn-sm" onclick='inspectFile(${JSON.stringify(f).replace(/'/g,"&#39;")})'>Inspect</button></td>
+      </tr>
+    `),
+    'No filesystem records returned.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 10A. FILESYSTEM EXPLORER ENTRY
+async function renderFilesystem(){
+  if(!state.filePath)state.filePath=rootPathForTarget();
+  await renderArchive();
+}
+
+// Windows reference telemetry contract: render real endpoint fields when available.
+async function renderWindowsReferenceTelemetry(){
+  if(!String(state.os||'').toLowerCase().includes('windows')) return '';
+  const base=`/api/cases/${encodeURIComponent(state.caseId)}`;
+  const q=`?device_id=${encodeURIComponent(deviceId())}&limit=8`;
+  let services=[], tasks=[], apps=[], history=[];
+  try{
+    const [svc,tsk,app,br]=await Promise.all([
+      api(`${base}/services${q}`),
+      api(`${base}/tasks${q}`),
+      api(`/api/applications?case_id=${encodeURIComponent(state.caseId)}&page=1&limit=8`),
+      api(`/api/browser/history?case_id=${encodeURIComponent(state.caseId)}&page=1&limit=8`)
+    ]);
+    services=svc.services||[];
+    tasks=tsk.tasks||[];
+    apps=app.items||[];
+    history=br.items||[];
+  }catch(e){}
+  return `
+  <div class="card panel mt-4" id="windowsReferenceTelemetry">
+    <div class="panel-title">
+      <span><i class="fa-brands fa-windows mr-1"></i> Windows Reference Telemetry</span>
+      <span class="tag ${services.length||tasks.length||apps.length||history.length?'ok':'info'}">
+        ${services.length||tasks.length||apps.length||history.length?'COLLECTED':'NO DATA COLLECTED'}
+      </span>
+    </div>
+    <div class="grid2 mt-3">
+      <div>
+        <div class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Services</div>
+        ${table(['Display Name','Startup Type','Status','Service Name'],
+          services.length ? services.map(s=>`<tr><td class="font-bold">${fmt(s.display_name)}</td><td class="mono text-xs">${fmt(s.startup_type)}</td><td>${fmt(s.status)}</td><td class="mono text-xs">${fmt(s.service_name)}</td></tr>`).join('') : '<tr><td colspan="4" class="text-slate-500">No endpoint telemetry received.</td></tr>')}
+      </div>
+      <div>
+        <div class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Scheduled Tasks</div>
+        ${table(['Task','Next Run','State','Author'],
+          tasks.length ? tasks.map(t=>`<tr><td class="font-bold">${fmt(t.task_name)}</td><td class="mono text-xs">${fmt(t.next_run)}</td><td>${fmt(t.state)}</td><td>${fmt(t.author)}</td></tr>`).join('') : '<tr><td colspan="4" class="text-slate-500">No endpoint telemetry received.</td></tr>')}
+      </div>
+      <div>
+        <div class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Installed Applications</div>
+        ${table(['Application Name','Install Location','Version','Publisher'],
+          apps.length ? apps.map(a=>`<tr><td class="font-bold">${fmt(a.application_name||a.name)}</td><td class="mono text-xs">${fmt(a.install_location||a.install_path)}</td><td>${fmt(a.version)}</td><td>${fmt(a.publisher)}</td></tr>`).join('') : '<tr><td colspan="4" class="text-slate-500">No endpoint telemetry received.</td></tr>')}
+      </div>
+      <div>
+        <div class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Browser Visits</div>
+        ${table(['Browser','URL','Visit Count','Timestamp'],
+          history.length ? history.map(h=>`<tr><td class="font-bold">${fmt(h.browser)}</td><td class="mono text-xs max-w-[280px] overflow-hidden text-ellipsis">${fmt(h.url)}</td><td class="mono font-bold">${fmt(h.visit_count)}</td><td class="mono text-xs">${formatUtc(h.timestamp)}</td></tr>`).join('') : '<tr><td colspan="4" class="text-slate-500">No endpoint telemetry received.</td></tr>')}
+      </div>
+    </div>
+  </div>`;
+}
+
+// 11. SYSTEM SPECIFICATIONS
+async function renderSystem(){
+  const d = await api(`/api/system?case_id=${encodeURIComponent(state.caseId)}`);
+  const sys = d.system || {};
+
+  $('#viewRoot').innerHTML = head('System &amp; Hardware Specifications (B7)', 'Plain-language view of the target computer: operating system, processor, memory, storage and firmware.', `<button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>`) +
+  `
+  <div class="grid2">
+    <div class="card panel">
+      <div class="panel-title">Operating System &amp; Kernel</div>
+      <div class="kv">
+        <div>Hostname</div><div class="font-bold mono">${fmt(sys.hostname)}</div>
+        <div>OS Name</div><div>${fmt(sys.os_name||sys.os)}</div>
+        <div>Release / Build</div><div class="mono">${fmt(sys.os_release||sys.build)}</div>
+        <div>Architecture</div><div class="mono">${fmt(sys.architecture)}</div>
+        <div>System Boot Time</div><div class="mono">${fmt(sys.boot_time)}</div>
+        <div>System Uptime</div><div>${sys.uptime_seconds ? `${(sys.uptime_seconds/3600).toFixed(1)} hours` : '—'}</div>
+        <div>Registered Owner</div><div>${fmt(sys.registered_owner||'—')}</div>
+        <div>Installation Date</div><div class="mono">${fmt(sys.install_date||'—')}</div>
+      </div>
+    </div>
+
+    <div class="card panel">
+      <div class="panel-title">CPU &amp; Physical Memory</div>
+      <div class="kv">
+        <div>Processor</div><div class="font-bold">${fmt(sys.cpu_name||sys.cpu)}</div>
+        <div>Physical Cores</div><div>${fmt(sys.cpu_physical_cores)} physical</div>
+        <div>Logical Threads</div><div>${fmt(sys.cpu_logical_cores)} threads</div>
+        <div>Total RAM</div><div class="font-bold">${sys.ram_total_gb!=null?fmt(Number(sys.ram_total_gb).toFixed(2)):'—'} GB</div>
+        <div>Available RAM</div><div>${sys.ram_available_gb!=null?fmt(Number(sys.ram_available_gb).toFixed(2)):'—'} GB</div>
+        <div>Memory Used</div><div>${d.memory?.used_ram_gb!=null?fmt(Number(d.memory.used_ram_gb).toFixed(2)):'—'} GB (${d.memory?.usage_pct!=null?fmt(Number(d.memory.usage_pct).toFixed(1)):'—'}%)</div>
+        <div>Motherboard / Manufacturer</div><div>${fmt(sys.motherboard||'—')}</div>
+        <div>BIOS Version</div><div class="mono">${fmt(sys.bios_version||'—')}</div>
+        <div>BIOS Serial Number</div><div class="mono">${fmt(sys.bios_serial||'—')}</div>
+      </div>
+    </div>
+  </div>
+
+  ${sys.disks ? `
+    <div class="card panel mt-4">
+      <div class="panel-title">Mounted Storage &amp; Physical Disks</div>
+      ${table(['Device / Mount', 'File System', 'Total Size', 'Used Size', 'Free Space', 'Percent Used'],
+        sys.disks.map(dk => `<tr><td class="font-bold mono">${fmt(dk.device||dk.mountpoint)}</td><td>${fmt(dk.fstype)}</td><td class="mono">${fmt(dk.total_gb)} GB</td><td class="mono">${fmt(dk.used_gb)} GB</td><td class="mono">${fmt(dk.free_gb)} GB</td><td><span class="tag">${fmt(dk.percent)}%</span></td></tr>`))}
+    </div>
+  ` : ''}
+
+  ${sys.user_profiles ? `
+    <div class="card panel mt-4">
+      <div class="panel-title">Endpoint User Accounts &amp; Profiles</div>
+      ${table(['Username', 'User SID', 'Profile Directory', 'Status'],
+        sys.user_profiles.map(u => `<tr><td class="font-bold">${fmt(u.username)}</td><td class="mono text-xs">${fmt(u.sid||'—')}</td><td class="mono text-xs">${fmt(u.profile_path||'—')}</td><td><span class="tag ok">PRESENT</span></td></tr>`))}
+    </div>
+  ` : ''}
+  ` + await renderWindowsReferenceTelemetry();
+}
+
+// 12. RUNNING PROCESSES
+async function renderProcesses(){
+  const url = `/api/processes?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Running Processes Explorer', 'Point-in-time process tree with cryptographic executable SHA-256 digests and command lines.', filterBar('Search process name, PID, user, path, hash…')) +
+  `<div class="card">` +
+  table(
+    ['PID', 'PPID', 'Process Name', 'User', 'CPU %', 'Memory', 'Threads', 'Children', 'Executable SHA-256', 'Path', 'Action'],
+    items.map(p => `
+      <tr>
+        <td class="mono font-bold">${fmt(p.pid)}</td>
+        <td class="mono text-slate-500">${fmt(p.ppid)}</td>
+        <td class="font-bold text-xs">${fmt(p.name)}</td>
+        <td>${fmt(p.user)}</td>
+        <td class="mono">${fmt(p.cpu_percent)}</td>
+        <td class="mono">${p.memory_kb ? `${(p.memory_kb/1024).toFixed(1)} MB` : '—'}</td>
+        <td class="mono text-center">${fmt(p.threads)}</td>
+        <td class="mono text-center">${fmt(p.child_count||0)}</td>
+        <td class="mono text-xs max-w-[200px] overflow-hidden text-ellipsis">${fmt(p.sha256||'—')}</td>
+        <td class="mono text-xs max-w-[280px] overflow-hidden text-ellipsis" title="${escapeHtml(p.executable_path)}">${fmt(p.executable_path)}</td>
+        <td><button class="btn btn-sm" onclick='inspectProcess(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Inspect</button></td>
+      </tr>
+    `),
+    'No process records returned.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 13. NETWORK FORENSICS
+async function renderNetwork(){
+  const url = `/api/network?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Network Forensics (B9 Socket Telemetry)', 'Active network sockets, established connections, and listening endpoints with PID mapping.', filterBar('Search IP address, port, process name, details…')) +
+  `<div class="card">` +
+  table(
+    ['Protocol', 'Local Address', 'Local Port', 'Remote Address', 'Remote Port', 'State', 'PID', 'Process Name', 'Details', 'Timestamp'],
+    items.map(n => `
+      <tr>
+        <td><span class="tag font-bold">${fmt(n.protocol)}</span></td>
+        <td class="mono font-semibold">${fmt(n.local_address)}</td>
+        <td class="mono">${fmt(n.local_port)}</td>
+        <td class="mono font-semibold text-blue-700 dark:text-blue-400">${fmt(n.remote_address||'—')}</td>
+        <td class="mono">${fmt(n.remote_port||'—')}</td>
+        <td><span class="tag ${n.state==='ESTABLISHED'?'ok':n.state==='LISTEN'?'info':'warn'}">${fmt(n.state||'—')}</span></td>
+        <td class="mono font-bold">${fmt(n.pid||'—')}</td>
+        <td class="font-semibold text-xs">${fmt(n.process_name||'—')}</td>
+        <td class="max-w-[260px] overflow-hidden text-ellipsis text-xs">${fmt(n.details)}</td>
+        <td class="mono text-xs">${fmt(n.timestamp)}</td>
+      </tr>
+    `),
+    'No network events recorded.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 14. LIVE MONITORING
+async function renderLive(){
+  const d = await api('/api/live');
+  const isRunning = d.is_monitoring;
+  const recent = d.recent_events || [];
+
+  $('#viewRoot').innerHTML = head('Live Forensic Monitoring &amp; Delta Capture (B9)', 'Investigator-controlled background monitoring engine for process start/exit and socket changes.', `
+    <button class="btn btn-sm ${isRunning?'btn-danger':'btn-success'}" onclick="${isRunning?'stopLiveMonitoring()':'startLiveMonitoring()'}">
+      <i class="fa-solid ${isRunning?'fa-stop':'fa-play'}"></i> ${isRunning?'Stop Live Monitoring':'Start Live Monitoring'}
+    </button>
+    <button class="btn btn-sm btn-primary" onclick="triggerSnapshot()"><i class="fa-solid fa-camera"></i> Instant Snapshot</button>
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+  `) +
+  `
+  <div class="stats">
+    <div class="card stat-card"><div class="stat-k">Engine Status</div><div class="stat-v ${isRunning?'text-green-600':'text-slate-500'}">${isRunning?'ACTIVE / RUNNING':'STOPPED / IDLE'}</div><div class="stat-sub">Investigator Controlled</div></div>
+    <div class="card stat-card"><div class="stat-k">Buffered Events</div><div class="stat-v">${d.buffered_events_count||0}</div><div class="stat-sub">In-Memory Delta Ring</div></div>
+    <div class="card stat-card"><div class="stat-k">Poll Interval</div><div class="stat-v">${d.poll_interval_seconds||3.0}s</div><div class="stat-sub">Background Loop</div></div>
+    <div class="card stat-card"><div class="stat-k">Bound Case</div><div class="stat-v text-sm mono">${fmt(d.case_id||state.caseId)}</div><div class="stat-sub">Persistence Target</div></div>
+  </div>
+
+  <div class="card panel">
+    <div class="panel-title"><span><i class="fa-solid fa-bolt mr-1"></i> Recent Live Monitoring Deltas</span><span class="text-xs text-slate-500">${recent.length} recent events</span></div>
+    ${table(
+      ['Timestamp (UTC)', 'Event Type', 'Category', 'Severity', 'Description', 'Process / Entity', 'Source'],
+      recent.map(e => `
+        <tr>
+          <td class="mono text-xs">${fmt(e.timestamp)}</td>
+          <td class="font-bold text-xs">${fmt(e.event_type)}</td>
+          <td><span class="tag">${fmt(e.category)}</span></td>
+          <td><span class="severity sev-${String(e.severity||'info').toLowerCase()}">${fmt(e.severity)}</span></td>
+          <td class="max-w-[400px] overflow-hidden text-ellipsis">${fmt(e.description)}</td>
+          <td class="mono text-xs">${fmt(e.entity||e.process||e.network_endpoint||'—')}</td>
+          <td><code>${fmt(e.source)}</code></td>
+        </tr>
+      `),
+      'No live delta events recorded yet. Start monitoring or trigger a snapshot above.'
+    )}
+  </div>
+  `;
+}
+
+window.startLiveMonitoring=async()=>{
+  try{
+    const r=await api('/api/live/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({case_id:state.caseId})});
+    toast('Live forensic monitoring started.');
+    renderView();
+  }catch(e){toast('Failed to start: '+e.message)}
+};
+
+window.stopLiveMonitoring=async()=>{
+  try{
+    const r=await api('/api/live/stop',{method:'POST'});
+    toast('Live monitoring stopped.');
+    renderView();
+  }catch(e){toast('Failed to stop: '+e.message)}
+};
+
+window.triggerSnapshot=async()=>{
+  toast('Capturing instant forensic delta snapshot…');
+  try{
+    const r=await api('/api/live/snapshot',{method:'POST'});
+    toast(`Snapshot completed: ${r.events_captured||0} events captured.`);
+    renderView();
+  }catch(e){toast('Snapshot error: '+e.message)}
+};
+
+// 15. EVIDENCE EXPLORER
+async function renderEvidence(){
+  const url = `/api/evidence?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Evidence Explorer (Artifact Manifests)', 'Comprehensive ledger of all raw forensic artifacts collected with cryptographic SHA-256 signatures.', filterBar('Search artifact name, path, type, hash…')) +
+  `<div class="card">` +
+  table(
+    ['Artifact ID', 'Category', 'Artifact Type', 'Name', 'Path / Store', 'Source Collector', 'Cryptographic SHA-256', 'Timestamp'],
+    items.map(a => `
+      <tr>
+        <td class="mono font-bold text-xs">${fmt(a.id)}</td>
+        <td><span class="tag info">${fmt(a.category)}</span></td>
+        <td class="font-semibold text-xs">${fmt(a.artifact_type)}</td>
+        <td>${fmt(a.name)}</td>
+        <td class="mono text-xs max-w-[320px] overflow-hidden text-ellipsis" title="${escapeHtml(a.path)}">${fmt(a.path)}</td>
+        <td><code>${fmt(a.source)}</code></td>
+        <td class="mono text-xs max-w-[200px] overflow-hidden text-ellipsis">${fmt(a.sha256||'—')}</td>
+        <td class="mono text-xs">${fmt(a.timestamp)}</td>
+      </tr>
+    `),
+    'No artifact evidence manifests recorded.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+// 16. HASH VERIFICATION
+async function renderHashes(){
+  const url = `/api/hashes?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
+  const d = await api(url);
+  state.totalPages = d.total_pages || 1;
+  const items = d.items || [];
+
+  $('#viewRoot').innerHTML = head('Cryptographic Hash Ledger &amp; Integrity Verification', 'SHA-256 cryptographic verification ledger for court and legal chain-of-custody admissibility.', filterBar('Search hash, path, item type…')) +
+  `
+  <div class="card panel mb-4">
+    <div class="panel-title"><i class="fa-solid fa-fingerprint mr-1"></i> Interactive Evidence Hash Verification</div>
+    <div class="flex gap-2">
+      <input id="hashVerifyInput" class="input mono text-xs" placeholder="Paste SHA-256 hash to verify against evidence ledger…">
+      <button class="btn btn-primary" onclick="verifyTargetHash()"><i class="fa-solid fa-check-double"></i> Verify Hash</button>
+    </div>
+    <div id="hashVerifyResult" class="mt-2 text-xs hiddenx"></div>
+  </div>
+
+  <div class="card">
+  ` +
+  table(
+    ['Item Type', 'Item Identifier', 'Target Path / Context', 'Cryptographic SHA-256', 'Integrity Status', 'Timestamp'],
+    items.map(h => `
+      <tr>
+        <td><span class="tag">${fmt(h.item_type)}</span></td>
+        <td class="mono text-xs font-semibold">${fmt(h.item_id)}</td>
+        <td class="mono text-xs max-w-[360px] overflow-hidden text-ellipsis" title="${escapeHtml(h.path)}">${fmt(h.path)}</td>
+        <td class="mono text-xs font-bold text-blue-700 dark:text-blue-400">${fmt(h.sha256)}</td>
+        <td><span class="tag ok"><i class="fa-solid fa-circle-check mr-1"></i>VERIFIED</span></td>
+        <td class="mono text-xs">${fmt(h.timestamp)}</td>
+      </tr>
+    `),
+    'No hash records returned.'
+  ) +
+  paginationBar(d.total||0, d.count||0) +
+  `</div>`;
+}
+
+window.verifyTargetHash=async()=>{
+  const target=$('#hashVerifyInput').value.trim();
+  const box=$('#hashVerifyResult');
+  if(!target){toast('Enter a SHA-256 hash.');return}
+  try{
+    const r=await api('/api/hashes/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sha256:target})});
+    box.classList.remove('hiddenx');
+    if(r.matched){
+      box.innerHTML=`<div class="p-3 rounded bg-green-50 dark:bg-green-950/30 border border-green-200 text-green-800 dark:text-green-300"><i class="fa-solid fa-circle-check mr-1 font-bold"></i><strong>MATCH CONFIRMED:</strong> Hash belongs to evidence artifact <span class="mono font-bold">${escapeHtml(r.hash?.item_id||'')}</span> (${escapeHtml(r.hash?.path||'')}) recorded at ${escapeHtml(r.hash?.timestamp||'')}.</div>`;
+    } else {
+      box.innerHTML=`<div class="p-3 rounded bg-red-50 dark:bg-red-950/30 border border-red-200 text-red-800 dark:text-red-300"><i class="fa-solid fa-circle-xmark mr-1 font-bold"></i><strong>NO MATCH:</strong> Supplied SHA-256 does not match any evidence artifact recorded in this case database.</div>`;
+    }
+  }catch(e){toast('Verification failed: '+e.message)}
+};
+
+// 17. ARCHIVE INSPECTOR
+async function renderArchive(){
+  if(!state.filePath)state.filePath=rootPathForTarget();
+  $('#viewRoot').innerHTML = head('Filesystem Explorer', 'Browse the target computer from its root. Select a folder to navigate, or a file to preview its contents and forensic metadata.', `${filterBar('Filter files…')}<button class="btn btn-sm" onclick="renderFilesystemArtifacts()"><i class="fa-solid fa-list"></i> Collected Artifacts</button>`) +
+  `
+  <div class="card panel mb-3">
+    <div class="pathbar">
+      <button class="btn btn-sm" onclick="goBackDirectory()" ${state.fileHistory.length?'':'disabled'}><i class="fa-solid fa-arrow-left"></i> Back</button>
+      <button class="btn btn-sm" onclick="goParentDirectory()"><i class="fa-solid fa-level-up-alt"></i> Up</button>
+      <input id="pathInput" class="input mono text-xs" value="${escapeHtml(state.filePath)}">
+      <button class="btn btn-sm btn-primary" onclick="browsePath()"><i class="fa-solid fa-arrow-right"></i> Browse</button>
+    </div>
+    <div id="dirBrowseTable" class="text-xs">Loading directory entries…</div>
+  </div>
+  `;
+
+  try{
+    const d=await api(`/api/devices/${encodeURIComponent(deviceId())}/filesystem/browse?path=${encodeURIComponent(state.filePath)}`);
+    const entries=(d.entries||[]).filter(matches);
+    $('#dirBrowseTable').innerHTML=table(
+      ['Name', 'Type', 'Size', 'Date Modified', 'Permissions', 'SHA-256', 'Action'],
+      entries.map(f => `
+        <tr class="file-row" onclick='inspectFile(${JSON.stringify(f).replace(/'/g,"&#39;")})'>
+          <td class="font-bold text-xs ${f.is_directory?'folder':'text-slate-800 dark:text-slate-200'}">
+            ${f.is_directory?'<i class="fa-solid fa-folder text-amber-500 mr-2"></i>':'<i class="fa-regular fa-file text-slate-400 mr-2"></i>'}${fmt(f.name)}
+          </td>
+          <td><span class="tag">${fmt(f.detected_type||(f.is_directory?'Directory':'File'))}</span></td>
+          <td class="mono text-xs">${f.size_bytes ? `${(f.size_bytes/1024).toFixed(1)} KB` : '0 B'}</td>
+          <td class="mono text-xs">${formatUtc(f.mtime)}</td>
+          <td class="mono text-xs">${fmt(f.attributes||f.mode)}</td>
+          <td class="mono text-xs max-w-[160px] overflow-hidden text-ellipsis">${fmt(f.sha256||'—')}</td>
+          <td><button class="btn btn-sm" onclick='event.stopPropagation();inspectFile(${JSON.stringify(f).replace(/'/g,"&#39;")})'>Inspect</button></td>
+        </tr>
+      `),
+      'No files found in this path.'
+    );
+  }catch(e){
+    $('#dirBrowseTable').innerHTML=`<div class="empty text-red-600">Failed to browse path: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// 18. SYSTEM LOGS & AUDIT
+async function renderLogs(){
+  const d = await api(`/api/cases/${encodeURIComponent(state.caseId)}/events`).catch(()=>({events:[]}));
+  const events = d.events || [];
+
+  $('#viewRoot').innerHTML = head('System Logs &amp; Immutable Audit Trail', 'Endpoint and investigator events, with the original record preserved for verification.', filterBar('Search audit log…')) +
+  `<div class="card">` +
+  table(
+    ['Timestamp (UTC)', 'Source', 'Readable Event', 'Details'],
+    events.slice(0, 100).map(e => `
+      <tr class="event-row">
+        <td class="mono text-xs timestamp">${formatUtc(e.timestamp||e.created_at)}</td>
+        <td class="font-bold text-xs">${fmt(e.event_id||e.source)}</td>
+        <td class="max-w-[600px] overflow-hidden text-ellipsis text-xs">${fmt(cleanLogMessage(e.message||e.line||JSON.stringify(e)))}</td>
+        <td><button class="btn btn-sm" onclick='showEventDetails(${JSON.stringify({...e,description:e.description||e.message||e.line||''}).replace(/'/g,"&#39;")})'><i class="fa-solid fa-eye"></i> Details</button></td>
+      </tr>
+    `),
+    'No event log items available.'
+  ) +
+  `</div>`;
+}
+
+// 19. REPORTS & EXPORT
+async function renderReports(){
+  const d = await api(`/api/reports?case_id=${encodeURIComponent(state.caseId)}`);
+  const formats = d.formats || [];
+
+  $('#viewRoot').innerHTML = head('Reports &amp; Evidence Export', `Case: ${state.caseId} · Generate multi-format defensive investigation reports with cryptographic verification.`) +
+  `
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <!-- Printable HTML Report Card -->
+    <div class="card panel">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="font-bold text-sm text-slate-800 dark:text-slate-100"><i class="fa-solid fa-file-code text-blue-600 mr-2"></i>Standalone HTML Forensic Report</div>
+          <div class="text-xs text-slate-500 mt-1">Complete self-contained HTML forensic dossier with executive summary, findings, full timeline, and embedded @media print stylesheets.</div>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-2">
+        <a href="/api/reports/html?case_id=${encodeURIComponent(state.caseId)}" target="_blank" class="btn btn-primary btn-sm"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in New Tab</a>
+      </div>
+    </div>
+
+    <!-- Structured JSON Report Card -->
+    <div class="card panel">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="font-bold text-sm text-slate-800 dark:text-slate-100"><i class="fa-solid fa-file-lines text-emerald-600 mr-2"></i>Structured JSON Forensic Report</div>
+          <div class="text-xs text-slate-500 mt-1">Machine-readable JSON export containing all normalized B1–B12 tables, SHA-256 hashes, MITRE ATT&amp;CK mappings, and host specs.</div>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-2">
+        <a href="/api/reports/json?case_id=${encodeURIComponent(state.caseId)}" target="_blank" class="btn btn-primary btn-sm"><i class="fa-solid fa-download"></i> Download JSON</a>
+      </div>
+    </div>
+
+    <!-- Printable PDF Report Card -->
+    <div class="card panel">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="font-bold text-sm text-slate-800 dark:text-slate-100"><i class="fa-solid fa-file-pdf text-red-600 mr-2"></i>PDF Investigation Report</div>
+          <div class="text-xs text-slate-500 mt-1">Formal PDF forensic report with chain of custody notice, severity distribution, and evidence tables.</div>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-2">
+        <a href="/api/reports/pdf?case_id=${encodeURIComponent(state.caseId)}" target="_blank" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-pdf"></i> Download PDF</a>
+      </div>
+    </div>
+
+    <!-- Native agent downloads -->
+    <div class="card panel">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="font-bold text-sm text-slate-800 dark:text-slate-100"><i class="fa-solid fa-download text-blue-600 mr-2"></i>Native Endpoint Agents</div>
+          <div class="text-xs text-slate-500 mt-1">Authenticated downloads for the native Windows and Linux single-file agents.</div>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-2 flex-wrap">
+        <a href="/downloads/agent/windows" class="btn btn-primary btn-sm"><i class="fa-brands fa-windows"></i> Windows Agent</a>
+        <a href="/downloads/agent/linux" class="btn btn-sm"><i class="fa-brands fa-linux"></i> Linux Agent</a>
+      </div>
+    </div>
+
+    <!-- Standardized ZIP Evidence Package Card -->
+    <div class="card panel">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="font-bold text-sm text-slate-800 dark:text-slate-100"><i class="fa-solid fa-box-archive text-amber-700 mr-2"></i>Standardized Evidence ZIP Package</div>
+          <div class="text-xs text-slate-500 mt-1">Court-admissible ZIP archive containing manifest.json, evidence.sqlite, timeline.json, and hashes/SHA256SUMS.</div>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-2">
+        <a href="/api/reports/package?case_id=${encodeURIComponent(state.caseId)}" class="btn btn-primary btn-sm"><i class="fa-solid fa-box-archive"></i> Download ZIP Package</a>
+        <a href="/api/reports/sqlite" class="btn btn-sm"><i class="fa-solid fa-database"></i> Download Raw SQLite DB</a>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+// ─── FILE INSPECTION MODAL ───────────────────────────────────────────────────
+
+window.inspectFile=async f=>{
+  if(f.is_directory||f.type==='directory'||f.is_dir){
+    const next=f.path||`${state.filePath.replace(/\/$/,'')}/${f.name||f.filename}`;
+    navigateToDirectory(next,true);
+    return;
+  }
+  const path=f.path||f.full_path||f.name;
+  let meta={};try{meta=await api(`/api/devices/${encodeURIComponent(deviceId())}/filesystem/metadata?path=${encodeURIComponent(path)}`)}catch{}
+  let preview=null;try{preview=await api(`/api/devices/${encodeURIComponent(deviceId())}/filesystem/preview?path=${encodeURIComponent(path)}`)}catch{}
+  let hex=null;try{hex=await api(`/api/devices/${encodeURIComponent(deviceId())}/filesystem/hex?path=${encodeURIComponent(path)}`)}catch{}
+  let archive=null;
+  if(/\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i.test(path)){try{archive=await api(`/api/devices/${encodeURIComponent(deviceId())}/filesystem/archive?path=${encodeURIComponent(path)}`)}catch{}}
+
+  const mime=preview?.mime||meta.mime||f.mime||'application/octet-stream';
+  let previewHtml='';
+  if(preview?.image_data_url){
+    previewHtml=`<img class="preview-image" src="${preview.image_data_url}" alt="Image preview">`;
+  } else if(preview?.pdf_data_url){
+    previewHtml=`<iframe class="preview-pdf" src="${preview.pdf_data_url}"></iframe>`;
+  } else if(preview?.content!=null){
+    previewHtml=`<pre class="preview-text">${escapeHtml(preview.content)}</pre>`;
+  } else {
+    previewHtml=`<div class="archive-empty">No preview available for this binary format.<br><span class="mono">${escapeHtml(mime)}</span></div>`;
+  }
+
+  openModal(`Deep Forensic Inspector · ${f.filename||f.name}`, `
+    <div class="file-inspector">
+      <div>
+        <div class="card panel">
+          <div class="panel-title">File Content Preview</div>
+          <div class="preview-box">${previewHtml}</div>
+        </div>
+        <div class="card panel mt-3">
+          <div class="panel-title">Hex Dump View</div>
+          ${renderHex(hex)}
+        </div>
+        ${archive ? `<div class="card panel mt-3 archive-members"><div class="panel-title"><span>Archive Contents</span><span class="investigation-chip">Read-only · ${archive.count||0} entries</span></div><div class="archive-list">${(archive.entries||[]).map(a=>`<div class="archive-member"><span><i class="fa-solid ${a.type==='directory'?'fa-folder text-amber-500':'fa-file text-slate-500'} file-type-icon mr-2"></i>${escapeHtml(a.name)}</span><span class="flex items-center gap-2"><span class="mono text-[10px]">${a.size_bytes!=null?Math.round(a.size_bytes/1024)+' KB':'—'}</span>${a.type==='file'?`<button class="btn btn-sm" onclick='inspectArchiveMember(${JSON.stringify(path).replace(/'/g,"&#39;")},${JSON.stringify(a.name).replace(/'/g,"&#39;")})'>Open</button>`:''}</span></div>`).join('')||'<div class="archive-empty">Archive is empty.</div>'}</div></div>`:''}
+      </div>
+      <div>
+        <div class="card panel">
+          <div class="panel-title">Forensic Metadata &amp; Hashes</div>
+          <div class="kv">
+            <div>Target Path</div><div class="mono break text-xs">${fmt(path)}</div>
+            <div>SHA-256</div><div class="mono break text-xs font-bold text-blue-700 dark:text-blue-400">${fmt(meta.sha256||f.sha256)}</div>
+            <div>File Size</div><div class="mono">${fmt(meta.size_bytes||f.size_bytes||f.size)} bytes</div>
+            <div>Detected Type</div><div>${fmt(meta.detected_type||f.detected_type||f.type)}</div>
+            <div>Extension Mismatch</div><div>${meta.mismatch_flag ? '<span class="tag bad">FLAGGED MISMATCH</span>' : '<span class="tag ok">NORMAL</span>'}</div>
+            <div>Owner / User</div><div>${fmt(meta.owner||'SYSTEM')}</div>
+            <div>Attributes / Mode</div><div class="mono">${fmt(meta.attributes||meta.mode)}</div>
+            <div>Created Time</div><div class="mono text-xs">${fmt(meta.created_time||f.created_time)}</div>
+            <div>Modified Time</div><div class="mono text-xs">${fmt(meta.modified_time||f.modified_time)}</div>
+            <div>Accessed Time</div><div class="mono text-xs">${formatUtc(meta.access_time||f.access_time)}</div>
+            <div>Change Time</div><div class="mono text-xs">${formatUtc(meta.change_time)}</div>
+            <div>Inode / File ID</div><div class="mono text-xs">${fmt(meta.inode||f.inode)}</div>
+            <div>Read Only</div><div>Yes</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+};
+
+function renderHex(h){
+  if(!h)return '<div class="empty">No hex stream returned.</div>';
+  const dump = h.hex_dump || [];
+  if(!dump.length)return '<div class="empty">Empty hex dump.</div>';
+  return `<div class="hex">${dump.map(r=>`<div><span class="off">${fmt(r.offset)}</span>  <span class="bytes">${fmt(r.hex)}</span>  <span class="ascii">${fmt(r.ascii)}</span></div>`).join('')}</div>`;
+}
+
+window.inspectProcess=p=>{
+  openModal(`Process Inspection · ${p.name} (PID ${p.pid})`, `
+    <div class="card panel">
+      <div class="panel-title">Process Execution Identity</div>
+      <div class="kv">
+        <div>PID</div><div class="mono font-bold">${fmt(p.pid)}</div>
+        <div>Parent PID</div><div class="mono">${fmt(p.ppid)}</div>
+        <div>Process Name</div><div class="font-bold">${fmt(p.name)}</div>
+        <div>User Context</div><div>${fmt(p.user)}</div>
+        <div>Executable Path</div><div class="mono break text-xs">${fmt(p.executable_path)}</div>
+        <div>Working Directory</div><div class="mono break text-xs">${fmt(p.working_directory||p.cwd)}</div>
+        <div>Cryptographic SHA-256</div><div class="mono break text-xs text-blue-700 dark:text-blue-400 font-bold">${fmt(p.sha256)}</div>
+        <div>Command Line</div><div class="mono break text-xs">${fmt(p.command_line||p.executable_path)}</div>
+        <div>CPU Utilization</div><div>${fmt(p.cpu_percent)}%</div>
+        <div>Memory (RSS)</div><div class="mono">${p.memory_kb ? `${(p.memory_kb/1024).toFixed(1)} MB` : '—'}</div>
+        <div>Thread Count</div><div class="mono">${fmt(p.threads)}</div>
+        <div>Child Processes</div><div class="mono">${p.child_pids?.length?p.child_pids.join(', '):'None observed'}</div>
+        <div>Process State</div><div>${fmt(p.state||'running')}</div>
+        <div>Start Time</div><div class="mono text-xs">${formatUtc(p.start_time)}</div>
+      </div>
+    </div>
+  `);
+};
+
+window.showRawLog=e=>openModal('Raw Normalized Forensic Record',`<pre class="log">${escapeHtml(JSON.stringify(e,null,2))}</pre>`);
+window.showEventDetails=e=>openModal('Forensic Event Details',`<div class="plain-note"><strong>What this means:</strong> This event is shown in UTC and is linked to the selected investigation. The raw payload is preserved below for verification.</div><div class="detail-grid"><div>Timestamp (UTC)</div><div class="mono">${formatUtc(e.timestamp)}</div><div>Severity</div><div><span class="severity sev-${String(e.severity||'info').toLowerCase()}">${fmt(e.severity||'INFO')}</span></div><div>Category</div><div>${fmt(e.category)}</div><div>Event Type</div><div class="font-bold">${fmt(e.event_type)}</div><div>Source</div><div>${fmt(e.source)}</div><div>Description</div><div>${fmt(e.description)}</div><div>Process / Entity</div><div class="mono">${fmt(e.entity||e.process||e.network_endpoint)}</div></div><div class="mt-4"><div class="panel-title">Raw Evidence Payload</div><pre class="log">${escapeHtml(JSON.stringify(e.payload??e,null,2))}</pre></div>`);
+window.inspectArchiveMember=async(archivePath,member)=>{try{const d=await api(`/api/devices/${encodeURIComponent(deviceId())}/filesystem/archive/content?path=${encodeURIComponent(archivePath)}&member=${encodeURIComponent(member)}`);const body=d.image_data_url?`<img class="preview-image" src="${d.image_data_url}">`:d.pdf_data_url?`<iframe class="preview-pdf" src="${d.pdf_data_url}"></iframe>`:`<pre class="preview-text">${escapeHtml(d.content||'No textual preview available.')}</pre>`;openModal(`Archive Member · ${member}`,`<div class="file-inspector"><div class="card panel"><div class="panel-title">Member Preview</div><div class="preview-box">${body}</div></div><div class="card panel"><div class="panel-title">Member Metadata</div><div class="detail-grid"><div>Archive</div><div class="mono break">${fmt(archivePath)}</div><div>Member</div><div class="mono break">${fmt(d.member||member)}</div><div>Size</div><div>${fmt(d.size_bytes)} bytes</div><div>MIME Type</div><div>${fmt(d.mime)}</div><div>Truncated</div><div>${d.truncated?'Yes':'No'}</div><div>Read Only</div><div>Yes</div></div></div></div>`)}catch(e){toast('Archive member could not be read: '+e.message)}};
+
+// Directory navigation
+function normalizePath(path){
+  let p=String(path||rootPathForTarget()).trim();
+  const win=String(state.os||'').toLowerCase().includes('windows');
+  if(win){
+    p=p.replace(/\\+/g,'\\');
+    if(/^[A-Za-z]:$/.test(p))p+='\\';
+    if(!/^[A-Za-z]:[\\/]/.test(p))p='C:\\'+p.replace(/^[/\\]+/,'');
+    return p;
+  }
+  p=p.replace(/\/{2,}/g,'/');
+  if(!p.startsWith('/'))p='/'+p;
+  if(p.length>1)p=p.replace(/\/$/,'');
+  return p||'/';
+}
+function navigateToDirectory(path,pushHistory=true){const next=normalizePath(path);if(next===state.filePath)return;if(pushHistory)state.fileHistory.push(state.filePath);state.filePath=next;renderArchive()}
+window.browsePath=()=>navigateToDirectory($('#pathInput').value||rootPathForTarget(),true);
+window.goBackDirectory=()=>{if(!state.fileHistory.length)return;state.filePath=state.fileHistory.pop()||rootPathForTarget();renderArchive()};
+window.goParentDirectory=()=>{
+  const win=String(state.os||'').toLowerCase().includes('windows');
+  if((!win&&state.filePath==='/')||(win&&/^[A-Za-z]:\\?$/.test(state.filePath)))return;
+  const parts=state.filePath.split(/[\\/]/).filter(Boolean); parts.pop();
+  state.filePath=win?((parts[0]||'C:')+'\\'+parts.slice(1).join('\\')):('/'+parts.join('/'));
+  state.filePath=normalizePath(state.filePath); renderArchive();
+};
+
+// ─── INITIALIZATION & ROUTING ────────────────────────────────────────────────
+
+async function switchCase(newCid){
+  if(!newCid || newCid === state.caseId) return;
+  state.caseId = newCid;
+  try{
+    const c = await api(`/api/cases/${encodeURIComponent(newCid)}`);
+    state.case = c;
+    state.os = c.target_os || state.os || 'Unknown';
+    try{const ov=await api(`/api/case/overview?case_id=${encodeURIComponent(newCid)}`);state.deviceId=ov.device_id||state.deviceId;state.device={id:state.deviceId,hostname:ov.host?.hostname,os:ov.host?.os_name||ov.host?.operating_system};if(state.device.os)state.os=state.device.os;}catch{}
+  }catch{}
+  state.filePath=rootPathForTarget(); state.fileHistory=[]; renderCaseBanner();
+  renderView();
+  toast(`Switched active context to Case ${newCid}`);
+}
+window.switchCase=switchCase;
+
+async function loadExistingCases(){
+  try{
+    const cases = await api('/api/cases');
+    state.casesList = Array.isArray(cases)?cases:[];
+    const sel = $('#caseSelector');
+    if(sel){
+      sel.innerHTML = state.casesList.map(c=>`<option value="${c.id}" ${c.id===state.caseId?'selected':''}>${c.id} (${c.name})</option>`).join('');
+    }
+    const box = $('#existingCasesBox');
+    const list = $('#existingCasesList');
+    if(box && list && state.casesList.length > 0){
+      box.classList.remove('hiddenx');
+      list.innerHTML = state.casesList.map(c => `
+        <div class="p-3 border rounded border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between">
+          <div>
+            <div class="font-bold text-xs mono text-blue-700 dark:text-blue-400">${fmt(c.id)}</div>
+            <div class="text-xs text-slate-700 dark:text-slate-300 font-semibold">${fmt(c.name)}</div>
+            <div class="text-[10px] text-slate-500">${fmt(c.description)}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" onclick="openExistingCase('${c.id}')"><i class="fa-solid fa-arrow-right"></i> Open</button>
+        </div>
+      `).join('');
+    }
+  }catch{}
+}
+
+window.openExistingCase=async cid=>{
+  state.caseId = cid;
+  const c = state.casesList.find(x=>x.id===cid) || {};
+  state.case = c;
+  state.os = c.target_os || 'Unknown';
+  try{const ov=await api(`/api/case/overview?case_id=${encodeURIComponent(cid)}`);state.deviceId=ov.device_id||state.deviceId;state.device={id:state.deviceId,hostname:ov.host?.hostname,os:ov.host?.os_name||ov.host?.operating_system};if(state.device.os)state.os=state.device.os;}catch{}
+  state.filePath=rootPathForTarget(); state.fileHistory=[]; renderCaseBanner();
+  setPage('dashboardPage');
+  setView('overview');
+  toast(`Opened existing case ${cid}`);
+};
+
+async function initializeDashboard(){
+  try{const ov=await api(`/api/case/overview?case_id=${encodeURIComponent(state.caseId)}`);state.deviceId=ov.device_id||state.deviceId;state.device={id:state.deviceId,hostname:ov.host?.hostname,os:ov.host?.os_name||ov.host?.operating_system};if(state.device.os)state.os=state.device.os;state.filePath=rootPathForTarget();}catch{}
+  renderCaseBanner();
+  setPage('dashboardPage');
+  setView('overview');
+  toast(`Case ${state.caseId} initialized with real normalized evidence.`);
+}
+
+function applyTheme(mode){document.body.classList.toggle('dark',mode==='dark');localStorage.setItem('jocky-theme',mode)}
+$('#themeToggle').onclick=()=>applyTheme(document.body.classList.contains('dark')?'light':'dark');
+applyTheme(localStorage.getItem('jocky-theme')||'dark');
+
+$('#manualRefresh').onclick=async()=>{
+  const b=$('#manualRefresh');
+  b.classList.add('is-refreshing');
+  b.disabled=true;
+  try{await renderView();toast('Forensic view refreshed.')}catch(e){toast('Refresh failed: '+e.message)}
+  finally{b.disabled=false;b.classList.remove('is-refreshing')}
+};
+
+$('#authOtp').addEventListener('input',e=>e.target.value=e.target.value.replace(/\D/g,'').slice(0,6));
+$('#copyCase').onclick=async()=>{try{await navigator.clipboard.writeText($('#caseTracking').value);toast('Case Tracking ID copied.')}catch{toast('Clipboard access unavailable.')}};
+$$('.os-card').forEach(b=>b.onclick=()=>{$$('.os-card').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');$('#targetOs').value=b.dataset.os});
+
+$('#authForm').onsubmit=async e=>{
+  e.preventDefault();const err=$('#authError');err.classList.add('hiddenx');
+  state.authUser=$('#authUser').value.trim();
+  try{
+    const fd=new FormData();fd.append('username',$('#authUser').value.trim());fd.append('password',$('#authPass').value);fd.append('otp',$('#authOtp').value);
+    const r=await fetch('/login',{method:'POST',body:fd,credentials:'same-origin'});
+    if(!r.ok)throw new Error('Authentication rejected by the server.');
+    sessionStorage.setItem('dfir_ui_auth','1');
+    setPage('intakePage');
+    $('#caseTracking').value=newCaseId();
+    $('#startTime').value=nowLocalInput();
+    await loadExistingCases();
+    toast('Authentication accepted.');
+  }catch(x){err.textContent=x.message;err.classList.remove('hiddenx')}
+};
+
+$('#caseForm').onsubmit=async e=>{
+  e.preventDefault();
+  const payload={
+    name:$('#caseName').value.trim(),
+    description:$('#scope').value.trim(),
+    investigator_name:$('#investigator').value.trim(),
+    investigator_org:$('#organization').value.trim(),
+    subject_name:$('#scope').value.trim(),
+    authorization_ref:$('#authorizer').value.trim(),
+    evidence_source:$('#custodian').value.trim(),
+    target_os:$('#targetOs').value,
+    investigation_notes:`Tracking ID: ${$('#caseTracking').value}; Status: ${$('#status').value}; Severity: ${$('#severity').value}`
+  };
+  try{
+    const created=await api('/api/cases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    state.caseId=created.id;
+    state.case={...payload,id:created.id,tracking:$('#caseTracking').value,startTime:$('#startTime').value};
+    state.os=$('#targetOs').value;
+    await loadExistingCases();
+    await initializeDashboard();
+  }catch(x){toast('Case creation failed: '+x.message)}
+};
+
+$$('.nav-item[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
+$('#rescopeBtn').onclick=()=>{
+  if(confirm('Return to Case Scoping? Current view will be preserved.')){
+    setPage('intakePage');
+    loadExistingCases();
+  }
+};
+$('#logoutBtn').onclick=async()=>{try{await fetch('/logout',{credentials:'same-origin'})}catch{}state.case=null;setPage('authPage');toast('Session closed.')};
+
+(async()=>{
+  try{
+    const s=await api('/api/auth/status');
+    if(s.authenticated){
+      await loadExistingCases();
+      // If we have an existing case with collected evidence, default directly to it!
+      if(state.casesList.length > 0){
+        state.caseId = state.casesList[0].id;
+        state.case = state.casesList[0];
+        state.os = state.case.target_os || 'Unknown';
+        renderCaseBanner();
+        setPage('dashboardPage');
+        setView('overview');
+      } else {
+        setPage('intakePage');
+        $('#caseTracking').value=newCaseId();
+        $('#startTime').value=nowLocalInput();
+      }
+    }
+  }catch{}
+})();
+</script>
+</body>
+</html>

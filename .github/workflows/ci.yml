@@ -1,0 +1,241 @@
+name: JOCKY CI — Combined
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ── Linux test matrix ───────────────────────────────────────────────────────
+  test-linux:
+    name: Test on Ubuntu (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install LLVM/Clang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm lld libssl-dev libffi-dev
+          clang --version
+          llvm-config --version
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Record baseline environment
+        run: |
+          echo "Python: $(python --version)"
+          echo "Clang: $(clang --version | head -1)"
+          echo "LLVM: $(llvm-config --version)"
+          pip freeze > /tmp/dep_baseline.txt
+          cat /tmp/dep_baseline.txt
+
+      - name: Core unit tests (deterministic, no host dependencies)
+        run: |
+          python -m pytest tests/test_lexer.py tests/test_parser.py \
+            tests/test_plan.py tests/test_codegen.py tests/test_crypto.py \
+            tests/test_manifest.py tests/test_audit.py -v
+
+      - name: Phase 1 security assessment tests
+        run: python -m pytest tests/test_phase1_implementation.py -v
+
+      - name: Server & integration tests
+        run: python -m pytest tests/test_server.py tests/test_integration.py -v
+
+      - name: Live monitoring tests
+        run: python -m pytest tests/test_live_monitoring.py -v
+
+      - name: LLVM pipeline & security assessment tests
+        run: |
+          python -m pytest tests/test_llvm_pipeline.py \
+            tests/test_security_assessment.py tests/test_linux_collectors.py -v
+
+      - name: DSL compiler smoke test
+        run: |
+          python -m src.jockyc examples/forensic_demo.jky --plan
+          python -m src.jockyc examples/full_forensic.jky --plan
+          python tools/build_jocky.py examples/full_forensic.jky \
+            -o build/full_forensic --backend llvm --build-metadata
+          test -s build/full_forensic
+          test -s build/full_forensic.manifest.json
+
+      - name: Verify manifest provenance
+        run: |
+          python -c "
+          import json
+          with open('build/full_forensic.manifest.json') as f:
+              m = json.load(f)
+          assert m.get('version') == '2.0', 'Manifest version mismatch'
+          assert 'provenance' in m, 'Missing provenance block'
+          assert m['manifest_sha256'], 'Missing manifest_sha256'
+          print('Manifest provenance OK:', m['provenance'])
+          "
+
+      - name: LLVM backend + native build validation
+        run: |
+          python -m src.jockyc examples/forensic_demo.jky \
+            --emit-llvm build/forensic_demo.ll -o build/forensic_demo
+          test -s build/forensic_demo
+
+      - name: Build identity uniqueness check (polymorphic engine)
+        run: |
+          python -c "
+          import poly.poly_engine as pe
+          id1 = pe.generate_build_identity()
+          id2 = pe.generate_build_identity()
+          assert id1['build_id'] != id2['build_id'], 'Build IDs must be unique'
+          assert id1['build_sha256'] != id2['build_sha256'], 'Build SHA must be unique'
+          print('Unique build IDs:', id1['build_id'], id2['build_id'])
+          "
+
+      - name: Security assessment module load check (read-only flag)
+        run: |
+          python -c "
+          from collector.security_assessment import assess_endpoint
+          r = assess_endpoint()
+          assert r['read_only'] is True, 'read_only flag must be True'
+          print('read_only:', r['read_only'])
+          "
+
+      - name: Log normalizer smoke test
+        run: |
+          python -c "
+          from collector.log_normalizer import normalize_logs
+          logs = [{'timestamp': '2026-09-11T08:00:00Z', 'message': 'test', 'source': 'journald',
+                   'channel': 'sshd', 'provider': 'sshd', 'level': 'INFO'}]
+          out = normalize_logs(logs, platform='linux')
+          assert len(out) == 1
+          required = ('timestamp','channel','event_id','level','severity_num',
+                      'provider','message','source','raw')
+          for k in required:
+              assert k in out[0], f'Missing key: {k}'
+          print('Log normalizer OK')
+          "
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jocky-build-linux-py${{ matrix.python-version }}
+          path: |
+            build/full_forensic
+            build/full_forensic.manifest.json
+            build/forensic_demo.ll
+          if-no-files-found: ignore
+
+  # ── Windows native build + collector validation ──────────────────────────────
+  test-windows:
+    name: Test on Windows (Python 3.13)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Record Windows environment
+        shell: pwsh
+        run: |
+          python --version
+          Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
+          Write-Host "Arch: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+
+      - name: Core unit tests on Windows
+        run: |
+          python -m pytest tests/test_lexer.py tests/test_parser.py `
+            tests/test_plan.py tests/test_codegen.py tests/test_crypto.py `
+            tests/test_manifest.py tests/test_audit.py -v
+
+      - name: Windows forensics + assessment tests
+        run: python -m pytest tests/test_windows_forensics.py -v
+
+      - name: Windows collector and dashboard contract smoke test
+        shell: pwsh
+        run: |
+          python -c "from collector.windows_collector import get_windows_system_info, get_windows_processes, get_windows_network, get_windows_users, get_windows_services, get_windows_software, get_windows_scheduled_tasks, get_windows_environment, get_windows_logs, get_windows_browser_history, get_windows_login_events, get_windows_network_interfaces; collectors = [get_windows_system_info, get_windows_processes, get_windows_network, get_windows_users, get_windows_services, get_windows_software, get_windows_scheduled_tasks, get_windows_environment, get_windows_logs, get_windows_browser_history, get_windows_login_events, get_windows_network_interfaces]; [c() for c in collectors]; print('Windows collector contract OK')"
+          $dashboard = Get-Content server/dashboard.html -Raw
+          foreach ($field in @('display_name', 'startup_type', 'application_name', 'install_location', 'next_run', 'visit_count')) {
+            if ($dashboard -notmatch [regex]::Escape($field)) { throw "Dashboard is missing Windows field: $field" }
+          }
+
+      
+
+      - name: DSL compile on Windows
+        run: python -m src.jockyc examples/full_forensic.jky --plan
+
+      - name: Windows native binary build (if LLVM present)
+        shell: pwsh
+        run: |
+          $clang = (Get-Command clang -ErrorAction SilentlyContinue)
+          if ($clang) {
+            Write-Host "Clang found: $($clang.Source)"
+            python tools/build_jocky.py examples/full_forensic.jky `
+              -o build/full_forensic_win.exe --backend llvm --build-metadata
+            if (!(Test-Path "build/full_forensic_win.exe")) {
+              Write-Host "::warning::Binary not produced — check build log"
+            } else {
+              $hash = (Get-FileHash "build/full_forensic_win.exe" -Algorithm SHA256).Hash
+              Write-Host "Binary SHA-256: $hash"
+            }
+          } else {
+            Write-Host "::notice::Clang not available on this runner; skipping native build"
+          }
+
+      - name: Windows agent smoke test (import, no network)
+        run: |
+          python -c "
+          import importlib, sys
+          sys.argv = ['jocky_agent', '--help']
+          try:
+              import agent.jocky_agent
+              print('Agent import OK')
+          except SystemExit:
+              print('Agent import OK (--help exit)')
+          "
+
+      - name: Upload Windows artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jocky-build-windows
+          path: build/
+          if-no-files-found: ignore
+
+  # ── Release gate: must pass before publish ──────────────────────────────────
+  release-gate:
+    name: Release Quality Gate
+    needs: [test-linux, test-windows]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check gate
+        run: |
+          if [[ "${{ needs.test-linux.result }}" != "success" ]]; then
+            echo "Linux tests FAILED — blocking release"
+            exit 1
+          fi
+          if [[ "${{ needs.test-windows.result }}" != "success" ]]; then
+            echo "Windows tests FAILED — blocking release"
+            exit 1
+          fi
+          echo "All quality gates passed"

@@ -1,0 +1,7 @@
+{
+  "source": "/tmp/pytest-of-b14ckW0lf/pytest-23/test_restore_verifies_hash0/test.db",
+  "backup": "/home/b14ckW0lf/Desktop/SUBMISSION_SIH/jockyfix_final/backups/jocky_forensics.20260927T174945Z.db",
+  "sha256": "6da1208b81809fb11f779b42f7eea5a9ca045e6e4e9b7bae48558465428a50b7",
+  "size_bytes": 458752,
+  "timestamp": "2026-09-27T17:49:45.139290+00:00"
+}
