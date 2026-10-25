@@ -626,6 +626,26 @@ CREATE INDEX IF NOT EXISTS idx_time_case ON timeline(case_id);
 CREATE INDEX IF NOT EXISTS idx_find_dev ON findings(device_id);
 CREATE INDEX IF NOT EXISTS idx_find_case ON findings(case_id);
 
+
+CREATE TABLE IF NOT EXISTS threat_intel_research (
+    id                 TEXT PRIMARY KEY,
+    case_id            TEXT NOT NULL,
+    indicator          TEXT NOT NULL,
+    indicator_type     TEXT NOT NULL,
+    query              TEXT NOT NULL,
+    sources_json       TEXT NOT NULL,
+    fetched_urls_json  TEXT,
+    fetched_content    TEXT,
+    status             TEXT NOT NULL,
+    review_status      TEXT DEFAULT 'UNREVIEWED',
+    investigator_notes TEXT,
+    created_at         TEXT NOT NULL,
+    FOREIGN KEY (case_id) REFERENCES cases(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_threat_intel_case ON threat_intel_research(case_id);
+CREATE INDEX IF NOT EXISTS idx_threat_intel_indicator ON threat_intel_research(indicator);
+
 CREATE INDEX IF NOT EXISTS idx_hashes_sha ON hashes(sha256);
 """
 
@@ -657,6 +677,30 @@ def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Apply incremental migrations for schema additions."""
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS threat_intel_research (
+                id                 TEXT PRIMARY KEY,
+                case_id            TEXT NOT NULL,
+                indicator          TEXT NOT NULL,
+                indicator_type     TEXT NOT NULL,
+                query              TEXT NOT NULL,
+                sources_json       TEXT NOT NULL,
+                fetched_urls_json  TEXT,
+                fetched_content    TEXT,
+                status             TEXT NOT NULL,
+                review_status      TEXT DEFAULT 'UNREVIEWED',
+                investigator_notes TEXT,
+                created_at         TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES cases(id)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_threat_intel_case ON threat_intel_research(case_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_threat_intel_indicator ON threat_intel_research(indicator)")
+        conn.commit()
+    except Exception:
+        pass
+
     migrations = [
         ("evidence", "source_collector", "TEXT"),
         ("evidence", "device_id",        "TEXT"),
@@ -1109,6 +1153,7 @@ def get_dfir_overview_stats(
         ("timeline_events", "timeline", None),
         ("findings", "findings", None),
         ("hashes", "hashes", None),
+        ("threat_intel_records", "threat_intel_research", None),
     ]
     counts: Dict[str, int] = {}
     for key, tbl, extra_where in tables:

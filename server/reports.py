@@ -131,6 +131,7 @@ def generate_json_report(
     artifact_stats: Optional[Dict[str, Any]] = None,
     hashes_list: Optional[List[Dict[str, Any]]] = None,
     latest_run: Optional[Dict[str, Any]] = None,
+    threat_intel_research: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Generate a fully traceable JSON forensic report with B1-B12 normalized data.
@@ -178,6 +179,7 @@ def generate_json_report(
         },
         "timeline_events": timeline_events,
         "hashes_count":    len(hashes_list or []),
+        "threat_intel_research": threat_intel_research or [],
         "cryptographic_hashes": hashes_list or [],
         "evidence_samples": evidence_list[:100],
         "evidence": evidence_list[:100],
@@ -254,6 +256,7 @@ def generate_html_report(
     artifact_stats: Optional[Dict[str, Any]] = None,
     hashes_list: Optional[List[Dict[str, Any]]] = None,
     latest_run: Optional[Dict[str, Any]] = None,
+    threat_intel_research: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """
     Generate a traceable HTML forensic report with comprehensive B1-B12 evidence breakdown.
@@ -341,6 +344,27 @@ def generate_html_report(
 
     if not findings_html:
         findings_html = "<div class='card'><p>No critical anomalies or suspicious findings identified in this collection run.</p></div>"
+
+    # ── External Threat Intelligence (TinyFish) ──────────────────────────────
+    threat_intel_html = ""
+    ti_records = threat_intel_research or []
+    if ti_records:
+        threat_intel_html += '<h2>Live Threat Intelligence Research (TinyFish)</h2><div class="card" style="margin-bottom:14px;"><p><strong>External Web Corroboration:</strong> The following public security advisories and threat intelligence records were retrieved via the TinyFish REST API for correlation against observed indicators. They provide secondary external context and do not alter acquired endpoint artifacts.</p></div>'
+        for ti in ti_records:
+            sources = ti.get("sources", [])
+            sources_li = ""
+            for s in sources[:5]:
+                sources_li += f'<li><strong><a href="{s.get("url","#")}" target="_blank" rel="noopener noreferrer">{s.get("title") or s.get("domain")}</a></strong> ({s.get("site_name") or s.get("domain")})<br><span style="font-size:11px;color:#64748b;">{s.get("snippet","")[:180]}...</span></li>'
+            
+            threat_intel_html += f"""
+            <div class="card" style="margin-bottom:12px;">
+              <h3 style="margin-top:0;">{_severity_badge("HIGH" if ti.get("review_status") == "SAVED_TO_FINDINGS" else "INFO")} Research: {ti.get("indicator")} ({str(ti.get("indicator_type", "indicator")).upper()})</h3>
+              <p><strong>Review Status:</strong> <code>{ti.get("review_status", "UNREVIEWED")}</code> &nbsp;|&nbsp; <strong>Retrieved:</strong> {ti.get("created_at","")} &nbsp;|&nbsp; <strong>Sources:</strong> {len(sources)}</p>
+              {f"<p><strong>Investigator Assessment:</strong> {ti.get('investigator_notes')}</p>" if ti.get("investigator_notes") else ""}
+              <ul style="padding-left:20px;line-height:1.6;">{sources_li}</ul>
+              <p style="color:#64748b;font-size:10.5px;margin-top:8px;"><em>Provenance note: External intelligence retrieved via TinyFish REST API for correlation. It does not replace or modify acquired endpoint evidence.</em></p>
+            </div>"""
+
 
     # ── Timeline table (top 100) ─────────────────────────────────────────────
     sev_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFORMATIONAL": 4, "INFO": 4}
@@ -440,6 +464,8 @@ def generate_html_report(
   <h2>Correlated Findings &amp; Detections ({len(findings)})</h2>
   {findings_html}
 
+  {threat_intel_html}
+
   <h2>Unified Forensic Timeline (Top {len(top_events)} Events)</h2>
   <div class="card" style="overflow-x:auto;">
     <table>
@@ -503,6 +529,7 @@ class ReportGenerator:
         conn = None
         timeline_events = []
         findings = []
+        threat_intel_list = []
         evidence_list = []
         artifact_stats = {}
         hashes_list = []
@@ -541,6 +568,19 @@ class ReportGenerator:
                 else:
                     f["evidence_references"] = []
                 findings.append(f)
+
+                        # Load threat intel research records
+            ti_rows = conn.execute(
+                "SELECT * FROM threat_intel_research WHERE case_id = ? ORDER BY created_at DESC",
+                (case_id,)
+            ).fetchall()
+            for r in ti_rows:
+                ti_rec = dict(r)
+                try:
+                    ti_rec["sources"] = json.loads(ti_rec.get("sources_json") or "[]")
+                except Exception:
+                    ti_rec["sources"] = []
+                threat_intel_list.append(ti_rec)
 
             # Hashes
             h_rows = conn.execute(
@@ -656,6 +696,7 @@ class ReportGenerator:
             "byovd_report": byovd_report,
             "artifact_stats": artifact_stats,
             "hashes_list": hashes_list,
+            "threat_intel_research": threat_intel_list,
             "latest_run": latest_run,
         }
 
@@ -696,6 +737,7 @@ class ReportGenerator:
             byovd_report=data["byovd_report"],
             artifact_stats=data.get("artifact_stats"),
             hashes_list=data.get("hashes_list"),
+            threat_intel_research=data.get("threat_intel_research"),
             latest_run=data.get("latest_run"),
         )
         report["report_markdown"] = ReportGenerator._render_markdown_report(data)
@@ -723,6 +765,7 @@ class ReportGenerator:
             byovd_report=data["byovd_report"],
             artifact_stats=data.get("artifact_stats"),
             hashes_list=data.get("hashes_list"),
+            threat_intel_research=data.get("threat_intel_research"),
             latest_run=data.get("latest_run"),
         )
 

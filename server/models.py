@@ -497,3 +497,173 @@ class DeviceTelemetryModel:
             except Exception: payload=row[1]
             out.append({"category":row[0],"data":payload,"timestamp":row[2]})
         return out
+
+
+
+class ThreatIntelModel:
+    @staticmethod
+    def save_research(case_id: str, indicator: str, indicator_type: str, query: str,
+                      sources: List[Dict[str, Any]], status: str = "SUCCESS", db_path: str = None) -> Dict[str, Any]:
+        research_id = f"intel_{uuid.uuid4().hex[:10]}"
+        now = datetime.now(timezone.utc).isoformat()
+        sources_json = json.dumps(sources)
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO threat_intel_research
+            (id, case_id, indicator, indicator_type, query, sources_json, status, review_status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'UNREVIEWED', ?)
+        """, (research_id, case_id, indicator, indicator_type, query, sources_json, status, now))
+        conn.commit()
+        conn.close()
+        return {
+            "id": research_id,
+            "case_id": case_id,
+            "indicator": indicator,
+            "indicator_type": indicator_type,
+            "query": query,
+            "sources": sources,
+            "status": status,
+            "review_status": "UNREVIEWED",
+            "created_at": now
+        }
+
+    @staticmethod
+    def update_fetched_content(research_id: str, fetched_url: str, content: str, db_path: str = None) -> bool:
+        conn = get_db_connection(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT fetched_urls_json FROM threat_intel_research WHERE id = ?", (research_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return False
+        existing_urls = []
+        if row[0]:
+            try:
+                existing_urls = json.loads(row[0])
+            except Exception:
+                existing_urls = []
+        if fetched_url not in existing_urls:
+            existing_urls.append(fetched_url)
+        cur.execute("""
+            UPDATE threat_intel_research
+            SET fetched_urls_json = ?, fetched_content = ?
+            WHERE id = ?
+        """, (json.dumps(existing_urls), content, research_id))
+        conn.commit()
+        conn.close()
+        return True
+
+    @staticmethod
+    def update_review(research_id: str, review_status: str, notes: str, db_path: str = None) -> bool:
+        conn = get_db_connection(db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE threat_intel_research
+            SET review_status = ?, investigator_notes = ?
+            WHERE id = ?
+        """, (review_status, notes, research_id))
+        rows_affected = cur.rowcount
+        conn.commit()
+        conn.close()
+        return rows_affected > 0
+
+    @staticmethod
+    def get_by_id(research_id: str, db_path: str = None) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM threat_intel_research WHERE id = ?", (research_id,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["sources"] = json.loads(d.get("sources_json") or "[]")
+        except Exception:
+            d["sources"] = []
+        try:
+            d["fetched_urls"] = json.loads(d.get("fetched_urls_json") or "[]")
+        except Exception:
+            d["fetched_urls"] = []
+        return d
+
+    @staticmethod
+    def list_for_case(case_id: str, db_path: str = None) -> List[Dict[str, Any]]:
+        conn = get_db_connection(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM threat_intel_research WHERE case_id = ? ORDER BY created_at DESC", (case_id,))
+        rows = cur.fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["sources"] = json.loads(d.get("sources_json") or "[]")
+            except Exception:
+                d["sources"] = []
+            try:
+                d["fetched_urls"] = json.loads(d.get("fetched_urls_json") or "[]")
+            except Exception:
+                d["fetched_urls"] = []
+            results.append(d)
+        return results
+
+    @staticmethod
+    def save_to_findings(case_id: str, research_id: str, title: str, severity: str,
+                         investigator_notes: str, recommendations: str = "",
+                         mitre_technique: str = "T1071", db_path: str = None) -> Dict[str, Any]:
+        conn = get_db_connection(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM threat_intel_research WHERE id = ?", (research_id,))
+        r_row = cur.fetchone()
+        if not r_row:
+            conn.close()
+            raise ValueError("Threat intelligence research record not found")
+        research = dict(r_row)
+
+        sources = []
+        try:
+            sources = json.loads(research.get("sources_json") or "[]")
+        except Exception:
+            pass
+
+        finding_id = f"fnd_intel_{uuid.uuid4().hex[:8]}"
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Build provenance-preserving evidence references
+        evidence_refs = [f"threat_intel_research:{research_id}"]
+        for s in sources[:5]:
+            if s.get("url"):
+                evidence_refs.append(s["url"])
+
+        cur.execute("""
+            INSERT INTO findings
+            (id, device_id, case_id, title, category, severity, description, evidence_refs, recommendations, mitre_technique, timestamp, status)
+            VALUES (?, 'EXTERNAL-INTEL', ?, ?, 'THREAT_INTELLIGENCE', ?, ?, ?, ?, ?, ?, 'CONFIRMED_FINDING')
+        """, (finding_id, case_id, title, severity, investigator_notes, json.dumps(evidence_refs), recommendations, mitre_technique, now))
+
+        # Update research review status
+        cur.execute("""
+            UPDATE threat_intel_research
+            SET review_status = 'SAVED_TO_FINDINGS', investigator_notes = ?
+            WHERE id = ?
+        """, (investigator_notes, research_id))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "id": finding_id,
+            "case_id": case_id,
+            "research_id": research_id,
+            "title": title,
+            "category": "THREAT_INTELLIGENCE",
+            "severity": severity,
+            "description": investigator_notes,
+            "evidence_references": evidence_refs,
+            "recommendations": recommendations,
+            "mitre_technique": mitre_technique,
+            "timestamp": now,
+            "status": "CONFIRMED_FINDING"
+        }

@@ -8,10 +8,18 @@ from collector.browser_forensics import BrowserForensicsCollector
 
 
 def test_read_only_acquisition_reads_real_file():
-    path = "/etc/hostname"
-    assert file_bytes(path, 128)
-    assert file_size(path) is not None
-    assert any(name == "hostname" for name, _ in list_dir("/etc"))
+    if os.name == "nt":
+        path = os.path.abspath(__file__)
+        parent = os.path.dirname(path)
+        base = os.path.basename(path)
+        assert file_bytes(path, 128)
+        assert file_size(path) is not None
+        assert any(name == base for name, _ in list_dir(parent))
+    else:
+        path = "/etc/hostname"
+        assert file_bytes(path, 128)
+        assert file_size(path) is not None
+        assert any(name == "hostname" for name, _ in list_dir("/etc"))
 
 
 def test_browser_collector_declares_real_acquisition_layer():

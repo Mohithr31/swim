@@ -170,6 +170,7 @@ body.dark .tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8}
       <button class="nav-item active" data-view="overview"><i class="fa-solid fa-chart-pie"></i> Case Overview</button>
       <button class="nav-item" data-view="timeline"><i class="fa-solid fa-clock-rotate-left"></i> Unified Timeline</button>
       <button class="nav-item" data-view="findings"><i class="fa-solid fa-triangle-exclamation"></i> Findings &amp; MITRE</button>
+      <button class="nav-item" data-view="threat_intel"><i class="fa-solid fa-shield-halved"></i> Live Threat Intelligence</button>
 
       <div class="nav-label">ARTIFACTS</div>
       <button class="nav-item" data-view="browser"><i class="fa-solid fa-globe"></i> Browser Forensics</button>
@@ -298,6 +299,7 @@ function simpleExplain(title){
   if(t.includes('timeline'))return 'Puts events from different forensic sources into one chronological view.';
   if(t.includes('logs'))return 'Shows endpoint and investigator events with the original evidence available for verification.';
   if(t.includes('findings'))return 'Highlights correlated evidence and the ATT&amp;CK techniques associated with it.';
+  if(t.includes('threat intelligence')||t.includes('tinyfish'))return 'Researches suspicious IP addresses, domains, URLs, or file hashes across public security advisories and vendor bulletins using TinyFish.';
   return 'This screen displays evidence collected from the selected endpoint and case.';
 }
 function head(title,copy,extra=''){
@@ -350,6 +352,7 @@ async function renderView(){
       case 'overview': await renderOverview(); break;
       case 'timeline': await renderTimeline(); break;
       case 'findings': await renderFindings(); break;
+      case 'threat_intel': await renderThreatIntel(); break;
       case 'browser': await renderBrowser(); break;
       case 'applications': await renderApplications(); break;
       case 'messaging': await renderMessaging(); break;
@@ -538,6 +541,532 @@ async function renderFindings(){
     </div>
   ` : `<div class="card empty">No correlated suspicious findings recorded in this case.</div>`);
 }
+
+
+// ===========================================================================
+// LIVE THREAT INTELLIGENCE (TINYFISH INTEGRATION)
+// ===========================================================================
+let tiCurrentResults = null;
+let tiCurrentIndicator = null;
+let tiCurrentType = null;
+let tiResearchId = null;
+
+window.pivotToThreatIntel = function(indicator, itype){
+  state.tiIndicator = indicator;
+  state.tiType = itype || 'auto';
+  setView('threat_intel');
+  setTimeout(() => {
+    if (window.executeThreatIntelSearch) {
+      window.executeThreatIntelSearch();
+    }
+  }, 300);
+};
+
+window.testSampleIndicator = function(val, itype){
+  const el = $('#tiInput');
+  const tEl = $('#tiType');
+  if(el) el.value = val;
+  if(tEl) tEl.value = itype;
+  state.tiIndicator = val;
+  state.tiType = itype;
+  onThreatIntelInput(val);
+};
+
+window.clearThreatIntel = function(){
+  tiCurrentResults = null;
+  tiCurrentIndicator = null;
+  tiCurrentType = null;
+  tiResearchId = null;
+  state.tiIndicator = '';
+  state.tiType = 'auto';
+  const el = $('#tiInput');
+  if(el) el.value = '';
+  const root = $('#tiResultsRoot');
+  if(root) root.innerHTML = '';
+  toast('Threat intelligence workspace cleared.');
+};
+
+window.onThreatIntelTypeChange = function(newType){
+  state.tiType = newType;
+  const inputEl = $('#tiInput');
+  if(inputEl) onThreatIntelInput(inputEl.value);
+};
+
+window.onThreatIntelInput = async function(val){
+  const msgEl = $('#tiValidationMsg');
+  if(!msgEl) return;
+  const raw = String(val||'').trim();
+  if(!raw){
+    msgEl.innerHTML = '<span class="text-slate-400">Enter a public IP, domain, URL, or hash.</span>';
+    return;
+  }
+  const typeEl = $('#tiType');
+  const itype = typeEl ? typeEl.value : 'auto';
+  try {
+    const v = await api('/api/threat-intel/validate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ indicator: raw, indicator_type: itype })
+    });
+    if(v.valid){
+      msgEl.innerHTML = `<span class="text-green-700 dark:text-green-400 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i> Valid ${escapeHtml(v.indicator_type.toUpperCase())} indicator ready for research.</span>`;
+    } else {
+      msgEl.innerHTML = `<span class="text-amber-700 dark:text-amber-400 font-semibold"><i class="fa-solid fa-circle-exclamation mr-1"></i> ${escapeHtml(v.error||'Invalid indicator')}</span>`;
+    }
+  } catch(e){
+    msgEl.innerHTML = `<span class="text-slate-500">${escapeHtml(e.message)}</span>`;
+  }
+};
+
+window.executeThreatIntelSearch = async function(){
+  const inputEl = $('#tiInput');
+  const typeEl = $('#tiType');
+  const contextEl = $('#tiContext');
+  const indicator = (inputEl ? inputEl.value : '').trim();
+  const itype = typeEl ? typeEl.value : 'auto';
+  const context = (contextEl ? contextEl.value : '').trim();
+  const cid = state.caseId || 'CASE-001';
+
+  if (!indicator) {
+    toast('Please enter an indicator value (domain, IP, URL, or hash).');
+    if (inputEl) inputEl.focus();
+    return;
+  }
+
+  const resultsRoot = $('#tiResultsRoot');
+  if (resultsRoot) {
+    resultsRoot.innerHTML = `
+      <div class="card p-8 text-center text-slate-600 dark:text-slate-300">
+        <div class="text-lg font-bold mb-2"><i class="fa-solid fa-satellite-dish fa-spin mr-2 text-blue-600"></i> Querying TinyFish Live Threat Intelligence...</div>
+        <div class="text-xs text-slate-500">Searching public advisories (CISA, CERT), threat intelligence databases, and vendor bulletins for <code class="mono font-bold">${escapeHtml(indicator)}</code>...</div>
+      </div>
+    `;
+  }
+
+  const btn = $('#tiSearchBtn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const payload = {
+      indicator: indicator,
+      indicator_type: itype,
+      case_id: cid,
+      context: context,
+      save_record: true
+    };
+    const res = await api('/api/threat-intel/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    tiCurrentResults = res;
+    tiCurrentIndicator = res.indicator;
+    tiCurrentType = res.indicator_type;
+    tiResearchId = res.research_id;
+    state.tiIndicator = res.indicator;
+    state.tiType = res.indicator_type;
+
+    renderThreatIntelResults(res);
+    toast(`Retrieved ${(res.results||[]).length} source(s) from TinyFish.`);
+  } catch(err) {
+    if (resultsRoot) {
+      resultsRoot.innerHTML = `
+        <div class="card p-6 border-l-4 border-l-red-600 bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-200">
+          <div class="font-bold text-sm mb-1"><i class="fa-solid fa-circle-exclamation mr-1"></i> TinyFish Threat Research Failed</div>
+          <div class="text-xs mb-3">${escapeHtml(err.message)}</div>
+          <button class="btn btn-sm" onclick="executeThreatIntelSearch()"><i class="fa-solid fa-rotate-right mr-1"></i> Retry Research</button>
+        </div>
+      `;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.renderThreatIntelResults = function(res){
+  const resultsRoot = $('#tiResultsRoot');
+  if (!resultsRoot) return;
+
+  const sources = res.results || [];
+  const indicator = res.indicator;
+  const itype = res.indicator_type;
+  const cid = state.caseId || 'CASE-001';
+
+  let html = `
+    <!-- RESULTS OVERVIEW BAR -->
+    <div class="card panel mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div class="font-bold text-sm flex items-center gap-2">
+            <span>Research Results for <code class="mono font-bold text-blue-700 dark:text-blue-400">${escapeHtml(indicator)}</code> (${escapeHtml(itype.toUpperCase())})</span>
+            <span class="tag ok"><i class="fa-solid fa-check mr-1"></i> ${sources.length} Public Sources Found</span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">Dispatched Query: <code class="mono text-[11px]">${escapeHtml(res.query)}</code> &nbsp;|&nbsp; Retrieved: <span class="mono text-[11px]">${formatUtc(res.retrieved_at)}</span></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="btn btn-sm btn-primary" onclick="generateThreatIntelBriefing()"><i class="fa-solid fa-file-shield mr-1"></i> Evidence-Linked Briefing</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SOURCE CARDS LIST -->
+    <div class="space-y-3 mb-4">
+      <div class="font-bold text-xs uppercase tracking-wide text-slate-500">Public Intelligence Sources (TinyFish REST API)</div>
+      ${sources.length ? sources.map((s, idx) => `
+        <div class="card p-4 hover:border-slate-400 transition-colors">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 mb-1 flex-wrap">
+                <span class="tag ${s.relevance_score>=80?'ok':s.relevance_score>=60?'info':'warn'} font-bold">${s.relevance_score}% Relevance</span>
+                <span class="tag font-mono text-[10px]">${escapeHtml(s.source_category)}</span>
+                <span class="font-bold text-xs text-slate-600 dark:text-slate-400">${escapeHtml(s.site_name || s.domain)}</span>
+              </div>
+              <div class="text-sm font-bold text-slate-900 dark:text-slate-100 mb-1">
+                <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="hover:text-blue-600 hover:underline inline-flex items-center gap-1">
+                  ${escapeHtml(s.title || s.domain)} <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-400"></i>
+                </a>
+              </div>
+              <div class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-2">${escapeHtml(s.snippet || 'No snippet available.')}</div>
+              <div class="mono text-[11px] text-slate-400 truncate max-w-xl">${escapeHtml(s.url)}</div>
+            </div>
+            <div class="flex flex-col gap-1 items-end flex-none">
+              <button class="btn btn-xs btn-primary" onclick="fetchSourceContent('${escapeHtml(s.url).replace(/'/g, "\'")}')"><i class="fa-solid fa-file-lines mr-1"></i> Fetch Full Page</button>
+              <button class="btn btn-xs" onclick="copySourceUrl('${escapeHtml(s.url).replace(/'/g, "\'")}')"><i class="fa-solid fa-copy mr-1"></i> Copy URL</button>
+            </div>
+          </div>
+        </div>
+      `).join('') : '<div class="card empty">No public threat intelligence sources returned for this indicator.</div>'}
+    </div>
+
+    <!-- INVESTIGATOR REVIEW & SAVE FINDING CARD -->
+    <div class="card panel border-t-4 border-t-blue-600">
+      <div class="panel-title">
+        <span><i class="fa-solid fa-user-shield mr-1"></i> Investigator Assessment &amp; Save Finding</span>
+        <span class="tag info">Case: ${escapeHtml(cid)}</span>
+      </div>
+      <div class="plain-note text-xs mb-3">
+        Review the public intelligence above. If relevant to this investigation, record your conclusions and attach an official finding to Case <strong>${escapeHtml(cid)}</strong>. The original source URLs will be linked for evidentiary provenance.
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3 mb-3">
+        <div class="md:col-span-6">
+          <label class="label required">Finding Title</label>
+          <input id="tiFindingTitle" class="input font-semibold" value="Live Threat Intel: ${escapeHtml(indicator)} (${escapeHtml(itype.toUpperCase())})">
+        </div>
+        <div class="md:col-span-3">
+          <label class="label required">Assessed Severity</label>
+          <select id="tiFindingSev" class="input">
+            <option value="CRITICAL">CRITICAL</option>
+            <option value="HIGH" selected>HIGH</option>
+            <option value="MEDIUM">MEDIUM</option>
+            <option value="LOW">LOW</option>
+            <option value="INFORMATIONAL">INFORMATIONAL</option>
+          </select>
+        </div>
+        <div class="md:col-span-3">
+          <label class="label">MITRE ATT&amp;CK Technique</label>
+          <input id="tiFindingTech" class="input mono" value="T1071 - Application Layer Protocol">
+        </div>
+        <div class="md:col-span-12">
+          <label class="label required">Investigator Review Notes &amp; Findings</label>
+          <textarea id="tiFindingNotes" class="input min-h-[90px]" placeholder="State your forensic observations, observed correlation with endpoint artifacts, and source assessment...">Correlated external threat intelligence retrieved via TinyFish confirms public reporting for ${escapeHtml(itype)} indicator '${escapeHtml(indicator)}'. Identified in ${sources.length} public advisory and vendor source(s).</textarea>
+        </div>
+        <div class="md:col-span-12">
+          <label class="label">Recommended Containment &amp; Remediation Actions</label>
+          <textarea id="tiFindingRec" class="input min-h-[70px]" placeholder="Recommended response actions...">Block '${escapeHtml(indicator)}' at perimeter firewalls/proxies. Perform forensic inspection of endpoint DNS cache and active process sockets. Verify absence of persistence mechanisms.</textarea>
+        </div>
+      </div>
+      <div class="flex items-center justify-between gap-3 pt-2">
+        <div id="tiSaveNotice" class="text-xs text-slate-500">Findings saved here appear in the official Case Findings &amp; MITRE view and exported forensic reports.</div>
+        <button class="btn btn-primary" onclick="saveThreatIntelFinding()"><i class="fa-solid fa-floppy-disk mr-1"></i> Save Reviewed Finding to Case</button>
+      </div>
+    </div>
+  `;
+
+  resultsRoot.innerHTML = html;
+};
+
+window.copySourceUrl = function(url){
+  navigator.clipboard.writeText(url).then(() => toast('Source URL copied to clipboard.')).catch(() => toast(url));
+};
+
+window.fetchSourceContent = async function(url){
+  openModal('Fetching Page Content via TinyFish...', '<div class="p-6 text-center text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Extracting clean readable text from ' + escapeHtml(url) + ' with SSRF protection...</div>');
+  try {
+    const res = await api('/api/threat-intel/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url, research_id: tiResearchId, case_id: state.caseId })
+    });
+    const body = `
+      <div class="space-y-3">
+        <div class="detail-grid">
+          <div>Source Title</div><div class="font-bold">${escapeHtml(res.title || '-')}</div>
+          <div>Original URL</div><div class="mono break"><a href="${escapeHtml(res.url)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${escapeHtml(res.url)}</a></div>
+          <div>Retrieved At (UTC)</div><div class="mono">${formatUtc(res.fetched_at)}</div>
+          <div>Extracted Length</div><div>${fmt(res.char_count)} chars ${res.truncated ? '(Truncated for bounded inspection)' : ''}</div>
+          <div>Evidentiary Category</div><div class="tag info">External Reference Corroboration</div>
+        </div>
+        <div class="panel-title mt-4">Extracted Markdown / Text Content</div>
+        <pre class="preview-text p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded text-xs overflow-auto max-h-[360px] whitespace-pre-wrap">${escapeHtml(res.content || 'No text extracted.')}</pre>
+        <div class="plain-note text-[11px]">
+          <strong>Note:</strong> Web content extracted via TinyFish is treated as untrusted data. It provides external intelligence context and does not overwrite endpoint forensic artifacts.
+        </div>
+      </div>
+    `;
+    openModal('Page Inspection · ' + (res.title || url), body);
+  } catch(err) {
+    openModal('Fetch Error', `<div class="p-4 text-red-600 text-xs">Failed to fetch page content: ${escapeHtml(err.message)}</div>`);
+  }
+};
+
+window.generateThreatIntelBriefing = async function(){
+  if (!tiCurrentResults || !(tiCurrentResults.results||[]).length) {
+    toast('No research results to summarize.');
+    return;
+  }
+  openModal('Compiling Evidence-Linked Threat Briefing...', '<div class="p-6 text-center text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Analyzing retrieved sources without hallucination...</div>');
+  try {
+    const res = await api('/api/threat-intel/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indicator: tiCurrentIndicator,
+        indicator_type: tiCurrentType,
+        results: tiCurrentResults.results
+      })
+    });
+    const citations = (res.sources_cited||[]).map(s => `<li><strong><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${escapeHtml(s.title||s.domain)}</a></strong> (${escapeHtml(s.site_name||s.domain)})</li>`).join('');
+    const excerpts = (res.findings_excerpts||[]).map(e => `<li class="text-xs mb-1 text-slate-700 dark:text-slate-300">${escapeHtml(e)}</li>`).join('');
+
+    const body = `
+      <div class="space-y-4">
+        <div class="p-3 rounded bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 text-xs text-blue-900 dark:text-blue-200">
+          <strong><i class="fa-solid fa-circle-info mr-1"></i> Threat Briefing:</strong> ${escapeHtml(res.summary)}
+        </div>
+        <div>
+          <div class="panel-title">Reported Findings &amp; Observations</div>
+          <ul class="list-disc pl-5 space-y-1">${excerpts || '<li class="text-xs text-slate-500">No excerpts available.</li>'}</ul>
+        </div>
+        <div>
+          <div class="panel-title">Cited Public Sources</div>
+          <ul class="list-disc pl-5 space-y-1 text-xs">${citations || '<li class="text-xs text-slate-500">None cited.</li>'}</ul>
+        </div>
+        <div class="plain-note text-[11px]">
+          <strong>Forensic Notice:</strong> ${escapeHtml(res.disclaimer)}
+        </div>
+        <div class="flex justify-end gap-2">
+          <button class="btn btn-sm btn-primary" onclick="prefillFindingFromBriefing()"><i class="fa-solid fa-pen-to-square mr-1"></i> Apply to Investigator Finding</button>
+        </div>
+      </div>
+    `;
+    openModal('Evidence-Linked Threat Briefing · ' + escapeHtml(tiCurrentIndicator), body);
+  } catch(err) {
+    openModal('Briefing Error', `<div class="p-4 text-red-600 text-xs">Failed to generate briefing: ${escapeHtml(err.message)}</div>`);
+  }
+};
+
+window.prefillFindingFromBriefing = function(){
+  closeModal();
+  const notesEl = $('#tiFindingNotes');
+  if (notesEl && tiCurrentResults) {
+    notesEl.value = `Verified external threat intelligence research for ${tiCurrentIndicator}. Sources corroborate threat activity across public advisories. Recommended for containment.`;
+    notesEl.scrollIntoView({ behavior: 'smooth' });
+    toast('Applied briefing to investigator assessment form.');
+  }
+};
+
+window.saveThreatIntelFinding = async function(){
+  if (!tiResearchId) {
+    toast('No active threat research record found to save.');
+    return;
+  }
+  const titleEl = $('#tiFindingTitle');
+  const sevEl = $('#tiFindingSev');
+  const notesEl = $('#tiFindingNotes');
+  const recEl = $('#tiFindingRec');
+  const techEl = $('#tiFindingTech');
+
+  const title = (titleEl ? titleEl.value : '').trim();
+  const severity = (sevEl ? sevEl.value : 'MEDIUM').trim();
+  const notes = (notesEl ? notesEl.value : '').trim();
+  const rec = (recEl ? recEl.value : '').trim();
+  const tech = (techEl ? techEl.value : 'T1071').trim();
+  const cid = state.caseId || 'CASE-001';
+
+  if (!title) { toast('Please provide a title for the finding.'); return; }
+  if (!notes) { toast('Please provide investigator review notes.'); return; }
+
+  try {
+    const payload = {
+      research_id: tiResearchId,
+      title: title,
+      severity: severity,
+      investigator_notes: notes,
+      recommendations: rec,
+      mitre_technique: tech
+    };
+    const res = await api(`/api/cases/${encodeURIComponent(cid)}/threat-intel/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    toast('Finding successfully saved to Case ' + cid);
+    const saveNotice = $('#tiSaveNotice');
+    if (saveNotice) {
+      saveNotice.innerHTML = `
+        <div class="p-3 rounded bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-xs text-green-800 dark:text-green-200 flex items-center justify-between">
+          <span><i class="fa-solid fa-circle-check mr-1"></i> Successfully saved finding <strong>${escapeHtml(res.finding?.id || '')}</strong> to case!</span>
+          <button class="btn btn-sm btn-primary" onclick="setView('findings')"><i class="fa-solid fa-triangle-exclamation mr-1"></i> View in Findings &amp; MITRE</button>
+        </div>
+      `;
+    }
+  } catch(err) {
+    toast('Error saving finding: ' + err.message);
+  }
+};
+
+window.displayHistoricalThreatIntel = function(h){
+  tiCurrentResults = {
+    indicator: h.indicator,
+    indicator_type: h.indicator_type,
+    query: h.query,
+    total_results: (h.sources||[]).length,
+    results: h.sources || [],
+    retrieved_at: h.created_at,
+    research_id: h.id
+  };
+  tiCurrentIndicator = h.indicator;
+  tiCurrentType = h.indicator_type;
+  tiResearchId = h.id;
+  state.tiIndicator = h.indicator;
+  state.tiType = h.indicator_type;
+
+  const inEl = $('#tiInput');
+  const tyEl = $('#tiType');
+  if(inEl) inEl.value = h.indicator;
+  if(tyEl) tyEl.value = h.indicator_type;
+
+  renderThreatIntelResults(tiCurrentResults);
+  const root = $('#tiResultsRoot');
+  if(root) root.scrollIntoView({ behavior: 'smooth' });
+  toast(`Loaded saved research for ${h.indicator}.`);
+};
+
+async function renderThreatIntel(){
+  const cid = state.caseId || 'CASE-001';
+  let history = [];
+  let statusInfo = { configured: true };
+  try {
+    statusInfo = await api('/api/threat-intel/status');
+  } catch(e) {}
+  try {
+    const hRes = await api(`/api/cases/${encodeURIComponent(cid)}/threat-intel`);
+    history = hRes.research_records || [];
+  } catch(e) {}
+
+  const indicatorVal = state.tiIndicator || '';
+  const typeVal = state.tiType || 'auto';
+
+  const toolbar = `
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+    <button class="btn btn-sm" onclick="clearThreatIntel()"><i class="fa-solid fa-trash-can"></i> Clear</button>
+  `;
+
+  let html = head('Live Threat Intelligence (TinyFish)', `Investigate suspicious indicators for Case ${cid} using live, source-grounded TinyFish search and fetch.`, toolbar);
+
+  if (!statusInfo.configured) {
+    html += `
+      <div class="card p-4 mb-4 border-l-4 border-l-amber-500 bg-amber-50 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-200">
+        <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+        <strong>Configuration Notice:</strong> <code>TINYFISH_API_KEY</code> is not configured in <code>.env</code>. Live search requires a valid key from <a href="https://agent.tinyfish.ai/" target="_blank" class="underline">agent.tinyfish.ai</a>.
+      </div>
+    `;
+  }
+
+  html += `
+    <div class="plain-note mb-4">
+      <i class="fa-solid fa-shield-halved mr-1"></i>
+      <strong>Forensic Provenance &amp; Evidentiary Separation:</strong> External web threat intelligence retrieved via TinyFish provides public advisory and vendor corroboration. It is strictly maintained as secondary research and does not modify original endpoint evidence, hashes, or chain-of-custody logs.
+    </div>
+
+    <!-- SEARCH PANEL -->
+    <div class="card panel mb-4">
+      <div class="panel-title">
+        <span><i class="fa-solid fa-magnifying-glass mr-1"></i> Public Threat Intelligence Search</span>
+        <span class="text-xs text-slate-500">Target Case: <strong class="mono text-slate-800 dark:text-slate-200">${escapeHtml(cid)}</strong></span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3 mb-3">
+        <div class="md:col-span-6">
+          <label class="label required">Indicator Value (Domain, Public IP, URL, or File Hash)</label>
+          <input id="tiInput" class="input mono font-bold" placeholder="e.g. 198.51.100.23, malicious-c2.org, or SHA-256 hash" value="${escapeHtml(indicatorVal)}" oninput="onThreatIntelInput(this.value)">
+          <div id="tiValidationMsg" class="text-[11px] mt-1 text-slate-500">Enter a public IP, domain, URL, or hash.</div>
+        </div>
+        <div class="md:col-span-3">
+          <label class="label">Indicator Type</label>
+          <select id="tiType" class="input" onchange="onThreatIntelTypeChange(this.value)">
+            <option value="auto" ${typeVal==='auto'?'selected':''}>Auto-Detect</option>
+            <option value="domain" ${typeVal==='domain'?'selected':''}>Domain (FQDN)</option>
+            <option value="ipv4" ${typeVal==='ipv4'?'selected':''}>Public IPv4</option>
+            <option value="ipv6" ${typeVal==='ipv6'?'selected':''}>Public IPv6</option>
+            <option value="url" ${typeVal==='url'?'selected':''}>Full URL (HTTP/S)</option>
+            <option value="sha256" ${typeVal==='sha256'?'selected':''}>SHA-256 Hash</option>
+            <option value="sha1" ${typeVal==='sha1'?'selected':''}>SHA-1 Hash</option>
+            <option value="md5" ${typeVal==='md5'?'selected':''}>MD5 Hash</option>
+          </select>
+        </div>
+        <div class="md:col-span-3">
+          <label class="label">Investigation Context (Optional)</label>
+          <input id="tiContext" class="input" placeholder="e.g. Ransomware, C2 Beaconing, Phishing" value="${escapeHtml(state.tiContext || '')}">
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="tiSearchBtn" class="btn btn-primary" onclick="executeThreatIntelSearch()"><i class="fa-solid fa-satellite-dish mr-1"></i> Query TinyFish Live Web</button>
+        <button class="btn" onclick="testSampleIndicator('evil-c2.com', 'domain')"><i class="fa-solid fa-flask mr-1"></i> Sample Domain</button>
+        <button class="btn" onclick="testSampleIndicator('8.8.8.8', 'ipv4')"><i class="fa-solid fa-network-wired mr-1"></i> Sample Public IP</button>
+        <button class="btn" onclick="testSampleIndicator('44d88612fea8a8f36de82e1278abb02f', 'md5')"><i class="fa-solid fa-hashtag mr-1"></i> Sample Hash (EICAR)</button>
+      </div>
+    </div>
+
+    <!-- ACTIVE RESULTS CONTAINER -->
+    <div id="tiResultsRoot"></div>
+
+    <!-- SAVED CASE RESEARCH HISTORY -->
+    <div class="card panel mt-4">
+      <div class="panel-title">
+        <span><i class="fa-solid fa-clock-rotate-left mr-1"></i> Threat Intelligence Research History for Case ${escapeHtml(cid)}</span>
+        <span class="text-xs text-slate-500">${history.length} saved record(s)</span>
+      </div>
+      ${history.length ? table(
+        ['Indicator', 'Type', 'Query Dispatched', 'Sources Found', 'Review Status', 'Timestamp (UTC)', 'Action'],
+        history.map(h => `
+          <tr>
+            <td class="mono font-bold text-xs">${escapeHtml(h.indicator)}</td>
+            <td><span class="tag">${escapeHtml(h.indicator_type)}</span></td>
+            <td class="text-xs max-w-[260px] truncate">${escapeHtml(h.query)}</td>
+            <td><span class="tag ok">${(h.sources||[]).length} source(s)</span></td>
+            <td><span class="severity ${h.review_status==='SAVED_TO_FINDINGS'?'sev-high':'sev-info'}">${escapeHtml(h.review_status||'UNREVIEWED')}</span></td>
+            <td class="mono text-xs">${formatUtc(h.created_at)}</td>
+            <td><button class="btn btn-sm" onclick='displayHistoricalThreatIntel(${JSON.stringify(h).replace(/'/g,"&#39;")})'><i class="fa-solid fa-eye"></i> View</button></td>
+          </tr>
+        `),
+        'No prior threat research records for this case.'
+      ) : '<div class="empty text-xs">No prior threat intelligence searches attached to this case. Run a research query above to begin.</div>'}
+    </div>
+  `;
+
+  $('#viewRoot').innerHTML = html;
+
+  // Auto-validate current input
+  if (indicatorVal) {
+    onThreatIntelInput(indicatorVal);
+  }
+  // If there are existing active results in memory, re-render them
+  if (tiCurrentResults) {
+    renderThreatIntelResults(tiCurrentResults);
+  }
+}
+
 
 // 4. BROWSER FORENSICS
 async function renderBrowser(){

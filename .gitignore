@@ -17,6 +17,7 @@ env/
 # Data & Evidence (runtime artifacts)
 evidence/
 cases/
+backups/
 *.db
 *.sqlite3
 manifest.json

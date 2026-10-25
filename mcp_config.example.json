@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "tinyfish": {
+      "url": "https://agent.tinyfish.ai/mcp"
+    },
+    "jocky-dfir": {
+      "command": "python",
+      "args": ["server/mcp_server.py"],
+      "env": {
+        "JOCKY_DB": "jocky_forensics.db"
+      }
+    }
+  }
+}

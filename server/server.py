@@ -3501,6 +3501,202 @@ def forensics_investigate_report():
         return jsonify({"error": str(exc)}), 400
 
 
+
+# ===========================================================================
+# JOCKY LIVE THREAT INTELLIGENCE (TINYFISH INTEGRATION)
+# ===========================================================================
+from server.tinyfish_service import TinyFishService, is_tinyfish_configured
+from server.models import ThreatIntelModel
+
+
+@app.route("/api/threat-intel/status", methods=["GET"])
+def threat_intel_status():
+    """Report whether TinyFish threat intelligence is configured, without exposing secrets."""
+    configured = is_tinyfish_configured()
+    return jsonify({
+        "configured": configured,
+        "provider": "TinyFish",
+        "search_available": configured,
+        "fetch_available": configured,
+        "capabilities": ["domain", "ipv4", "ipv6", "url", "sha256", "sha1", "md5"],
+        "version": "2026.1",
+    })
+
+
+@app.route("/api/threat-intel/validate", methods=["POST"])
+def threat_intel_validate():
+    """Validate and infer type for an indicator prior to search."""
+    data = request.get_json(silent=True) or {}
+    indicator = (data.get("indicator") or "").strip()
+    itype = data.get("indicator_type")
+    is_valid, norm_val, resolved_type, err = TinyFishService.validate_indicator(indicator, itype)
+    return jsonify({
+        "valid": is_valid,
+        "indicator": norm_val or indicator,
+        "indicator_type": resolved_type,
+        "error": err,
+    })
+
+
+@app.route("/api/threat-intel/research", methods=["POST"])
+def threat_intel_research():
+    """Execute live TinyFish search for an indicator, optionally binding to a case."""
+    data = request.get_json(silent=True) or {}
+    indicator = (data.get("indicator") or "").strip()
+    itype = data.get("indicator_type")
+    cid = data.get("case_id")
+    context = data.get("context")
+    save_record = data.get("save_record", True)
+
+    if not indicator:
+        return jsonify({"error": "Indicator is required"}), 400
+
+    # Execute search via TinyFishService
+    search_res = TinyFishService.search(indicator, indicator_type=itype, context=context)
+    if not search_res.get("success"):
+        return jsonify(search_res), 400 if search_res.get("code") == "VALIDATION_ERROR" else 502
+
+    # Save to database if case_id provided
+    research_id = None
+    if cid and save_record:
+        case = CaseModel.get_by_id(cid, get_db_path())
+        if case:
+            saved = ThreatIntelModel.save_research(
+                case_id=cid,
+                indicator=search_res["indicator"],
+                indicator_type=search_res["indicator_type"],
+                query=search_res["query"],
+                sources=search_res.get("results", []),
+                status="SUCCESS",
+                db_path=get_db_path(),
+            )
+            research_id = saved.get("id")
+            record_audit_event(
+                "investigator",
+                "RESEARCH_INDICATOR_TINYFISH",
+                cid,
+                {"indicator": search_res["indicator"], "type": search_res["indicator_type"], "results_count": search_res.get("total_results", 0)},
+                get_db_path(),
+            )
+
+    search_res["research_id"] = research_id
+    search_res["case_id"] = cid
+    return jsonify(search_res)
+
+
+@app.route("/api/threat-intel/fetch", methods=["POST"])
+def threat_intel_fetch():
+    """Fetch clean content from a permitted public source URL with SSRF protection."""
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    research_id = data.get("research_id")
+    cid = data.get("case_id")
+
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+
+    fetch_res = TinyFishService.fetch_source(url)
+    if not fetch_res.get("success"):
+        status_code = 400 if fetch_res.get("code") in ("SSRF_BLOCKED", "INVALID_URL") else 502
+        return jsonify(fetch_res), status_code
+
+    if research_id:
+        ThreatIntelModel.update_fetched_content(
+            research_id=research_id,
+            fetched_url=url,
+            content=fetch_res.get("content", ""),
+            db_path=get_db_path(),
+        )
+
+    if cid:
+        record_audit_event(
+            "investigator",
+            "FETCH_SOURCE_TINYFISH",
+            cid,
+            {"url": url, "title": fetch_res.get("title", ""), "char_count": fetch_res.get("char_count", 0)},
+            get_db_path(),
+        )
+
+    return jsonify(fetch_res)
+
+
+@app.route("/api/threat-intel/summary", methods=["POST"])
+def threat_intel_summary():
+    """Generate evidence-grounded summary from retrieved sources."""
+    data = request.get_json(silent=True) or {}
+    indicator = (data.get("indicator") or "").strip()
+    itype = data.get("indicator_type", "indicator")
+    results = data.get("results", [])
+    summary_data = TinyFishService.generate_evidence_summary(indicator, itype, results)
+    return jsonify(summary_data)
+
+
+@app.route("/api/cases/<case_id>/threat-intel", methods=["GET"])
+def get_case_threat_intel(case_id):
+    """Retrieve all threat intelligence research records for a permitted case."""
+    case = CaseModel.get_by_id(case_id, get_db_path())
+    if not case:
+        return jsonify({"error": "Case not found"}), 404
+
+    records = ThreatIntelModel.list_for_case(case_id, get_db_path())
+    return jsonify({
+        "case_id": case_id,
+        "count": len(records),
+        "research_records": records,
+    })
+
+
+@app.route("/api/cases/<case_id>/threat-intel/save", methods=["POST"])
+def save_threat_intel_finding(case_id):
+    """Save an investigator-reviewed threat intelligence finding to the case."""
+    case = CaseModel.get_by_id(case_id, get_db_path())
+    if not case:
+        return jsonify({"error": "Case not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    research_id = data.get("research_id")
+    title = (data.get("title") or "").strip()
+    severity = (data.get("severity") or "MEDIUM").strip().upper()
+    notes = (data.get("investigator_notes") or "").strip()
+    recommendations = (data.get("recommendations") or "").strip()
+    mitre_tech = (data.get("mitre_technique") or "T1071").strip()
+
+    if not research_id:
+        return jsonify({"error": "research_id is required"}), 400
+    if not title:
+        return jsonify({"error": "Finding title is required"}), 400
+    if not notes:
+        return jsonify({"error": "Investigator review notes are required"}), 400
+
+    try:
+        finding = ThreatIntelModel.save_to_findings(
+            case_id=case_id,
+            research_id=research_id,
+            title=title,
+            severity=severity,
+            investigator_notes=notes,
+            recommendations=recommendations,
+            mitre_technique=mitre_tech,
+            db_path=get_db_path(),
+        )
+
+        record_audit_event(
+            "investigator",
+            "SAVE_THREAT_INTEL_FINDING",
+            case_id,
+            {"research_id": research_id, "finding_id": finding["id"], "severity": severity},
+            get_db_path(),
+        )
+
+        return jsonify({"success": True, "finding": finding}), 201
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": f"Failed to save finding: {type(e).__name__}"}), 500
+
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("JOCKY_PORT", 5000))
     host = os.environ.get("JOCKY_HOST", "127.0.0.1")
