@@ -1,4 +1,4 @@
-# JOCKY DFIR Gateway — Windows + Linux Integration Fix
+# Tiny Monitor — Windows + Linux Integration Fix
 
 ## What was fixed
 

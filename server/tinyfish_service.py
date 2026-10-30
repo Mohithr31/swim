@@ -67,22 +67,48 @@ HASH_SHA1_REGEX = re.compile(r"^[a-fA-F0-9]{40}$")
 HASH_SHA256_REGEX = re.compile(r"^[a-fA-F0-9]{64}$")
 
 
+def is_placeholder_credential(val: Optional[str]) -> bool:
+    if not val:
+        return True
+    s = str(val).strip().lower()
+    return (
+        s.startswith("replace_with_")
+        or s.startswith("your_")
+        or (s.startswith("<") and s.endswith(">"))
+        or "your-secret" in s
+        or "example" in s
+        or s in (
+            "change_me",
+            "changeme",
+            "default",
+            "password",
+            "secret",
+            "change-this-to-a-secure-random-key-in-production",
+            "dev-insecure-secret-key-change-in-production",
+        )
+    )
+
+
 def get_tinyfish_api_key() -> str:
-    """Retrieve TinyFish API key from environment without logging or exposing it."""
+    """Retrieve TinyFish API key from environment or .env without logging or exposing it."""
     key = os.environ.get("TINYFISH_API_KEY", "").strip()
-    if not key:
+    if not key or key.startswith("${"):
         try:
             from dotenv import load_dotenv
             root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            load_dotenv(os.path.join(root, ".env"))
+            load_dotenv(os.path.join(root, ".env"), override=True)
             key = os.environ.get("TINYFISH_API_KEY", "").strip()
         except Exception:
             pass
+    if key.startswith("${"):
+        key = ""
+    if is_placeholder_credential(key):
+        return ""
     return key
 
 
 def is_tinyfish_configured() -> bool:
-    """Check whether a non-empty TinyFish API key is present."""
+    """Check whether a non-empty, non-placeholder TinyFish API key is present."""
     return bool(get_tinyfish_api_key())
 
 

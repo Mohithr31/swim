@@ -1,4 +1,4 @@
-# JOCKY DFIR Gateway — Cross-Platform UI & Endpoint Forensics Upgrade
+# Tiny Monitor — Cross-Platform UI & Endpoint Forensics Upgrade
 
 This upgrade keeps the existing feature-rich project as the base and improves the Linux/Windows parity and investigator UI.
 

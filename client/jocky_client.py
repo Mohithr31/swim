@@ -84,6 +84,15 @@ class JockyClient:
         res = requests.get(f"{self.server_url}/api/reports/{case_id}", headers=self.headers)
         return res.json()
 
+    def threat_intel_status(self) -> Dict:
+        res = requests.get(f"{self.server_url}/api/threat-intel/status", headers=self.headers)
+        return res.json()
+
+    def research_indicator(self, indicator: str, indicator_type: str = "auto") -> Dict:
+        payload = {"indicator": indicator, "indicator_type": indicator_type}
+        res = requests.post(f"{self.server_url}/api/threat-intel/research", json=payload, headers=self.headers)
+        return res.json()
+
 
 def main():
     parser = argparse.ArgumentParser(description="JOCKY Forensic CLI Client")
@@ -122,12 +131,22 @@ def main():
     c_rep = sub.add_parser("report", help="Generate case report")
     c_rep.add_argument("case_id", help="Case ID")
 
+    sub.add_parser("threat-intel", help="Check TinyFish threat intel configuration and status")
+
+    c_res = sub.add_parser("research", help="Research an indicator (domain, IP, URL, or hash) via TinyFish")
+    c_res.add_argument("indicator", help="Indicator value to search")
+    c_res.add_argument("--type", default="auto", help="Indicator type (auto, domain, ipv4, ipv6, url, sha256)")
+
     args = parser.parse_args()
     client = JockyClient(server_url=args.server, api_key=args.api_key)
 
     try:
         if args.command == "health":
             print(json.dumps(client.health(), indent=2))
+        elif args.command == "threat-intel":
+            print(json.dumps(client.threat_intel_status(), indent=2))
+        elif args.command == "research":
+            print(json.dumps(client.research_indicator(args.indicator, args.type), indent=2))
         elif args.command == "devices":
             print(json.dumps(client.list_devices(), indent=2))
         elif args.command == "create-case":

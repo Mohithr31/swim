@@ -872,7 +872,7 @@ def main():
         do_all = args.all or not has_specific
 
         print("=" * 65)
-        print(" JOCKY DFIR GATEWAY — LOCAL FORENSIC TRIAGE COLLECTOR")
+        print(" TINY MONITOR — LOCAL FORENSIC TRIAGE COLLECTOR")
         print("=" * 65)
         print(f" Target Case ID  : {target_case}")
         print(f" Output Location : {target_out}")

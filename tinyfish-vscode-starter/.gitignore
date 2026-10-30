@@ -1,0 +1,10 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Common local artifacts
+.DS_Store
+Thumbs.db

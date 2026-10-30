@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B3 Messaging Forensics Engine
+Tiny Monitor — B3 Messaging Forensics Engine
 Defensive local artifact discovery for WhatsApp, Telegram, Signal, Discord, iMessage, and Android backups.
 Discovers application presence, profile directories, local database presence, metadata, timestamps,
 attachment metadata, file hashes, and message counts without collecting credentials, tokens, or session secrets.

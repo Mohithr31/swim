@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B7 System Forensics Engine
+Tiny Monitor — B7 System Forensics Engine
 Collects authentic endpoint identity, hardware specifications, operating system build,
 uptime, boot time, CPU, memory, domain/workgroup, timezone, locale, and BIOS information.
 If any hardware attribute cannot be queried, returns NOT_ACCESSIBLE. Never fabricates values.

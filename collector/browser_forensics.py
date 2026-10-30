@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B1 Browser Forensics Engine
+Tiny Monitor — B1 Browser Forensics Engine
 Real local browser artifact collection for Chrome, Edge, Brave, Opera, Vivaldi, Firefox.
 Safely copies SQLite databases to temporary files, handles locks, read-only pragmas,
 extracts history, downloads, bookmarks, search activity, profiles, domain/login evidence,

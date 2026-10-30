@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "tinyfish": {
+      "url": "https://agent.tinyfish.ai/mcp",
+      "headers": {
+        "X-API-Key": "${env:TINYFISH_API_KEY}",
+        "Authorization": "Bearer ${env:TINYFISH_API_KEY}"
+      }
+    },
+    "jocky-dfir": {
+      "command": "python",
+      "args": ["server/mcp_server.py"],
+      "env": {
+        "JOCKY_DB": "jocky_forensics.db",
+        "TINYFISH_API_KEY": "${env:TINYFISH_API_KEY}"
+      }
+    }
+  }
+}

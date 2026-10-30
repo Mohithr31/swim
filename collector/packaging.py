@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B10 Evidence Transport & Packaging Engine
+Tiny Monitor — B10 Evidence Transport & Packaging Engine
 Generates standardized, tamper-evident evidence packages:
 case/
     manifest.json

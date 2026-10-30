@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TINY MONITOR — TinyFish-Powered Digital Forensics & Incident Response Platform</title>
+  <meta name="description" content="Tiny Monitor is a TinyFish-powered DFIR and threat intelligence platform built for the Swim with TinyFish Hackathon at Presidency University Bengaluru.">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐟</text></svg>">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="app-sidebar">
+      <div class="sidebar-header">
+        <div class="brand-badge">
+          <div class="brand-logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <circle cx="12" cy="11" r="3"/>
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title">TINY MONITOR</div>
+            <div class="brand-subtitle">TinyFish DFIR Platform</div>
+          </div>
+        </div>
+        <div class="hackathon-pill">Presidency University Hackathon</div>
+      </div>
+
+      <nav class="sidebar-nav" id="sidebar-nav-list">
+        <a class="nav-item active" data-view="overview" id="nav-overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          <span>Overview</span>
+        </a>
+        <a class="nav-item" data-view="cases" id="nav-cases">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          <span>Cases</span>
+        </a>
+        <a class="nav-item" data-view="evidence" id="nav-evidence">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+          <span>Digital Evidence</span>
+        </a>
+        <a class="nav-item" data-view="threat-intel" id="nav-threat-intel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            <path d="M11 8v6M8 11h6"></path>
+          </svg>
+          <span>Threat Intel (TinyFish)</span>
+        </a>
+        <a class="nav-item" data-view="timeline" id="nav-timeline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+          <span>Investigation Timeline</span>
+        </a>
+        <a class="nav-item" data-view="reports" id="nav-reports">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="12" y1="18" x2="12" y2="12"></line>
+            <line x1="9" y1="15" x2="15" y2="15"></line>
+          </svg>
+          <span>Forensic Reports</span>
+        </a>
+        <a class="nav-item" data-view="settings" id="nav-settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>Integration &amp; Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div>Platform: <b>Tiny Monitor v1.0</b></div>
+        <div style="margin-top: 4px;">Search: <a href="https://docs.tinyfish.ai" target="_blank" rel="noopener">TinyFish Search API</a></div>
+      </div>
+    </aside>
+
+    <!-- Main Content Body -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 class="topbar-page-title" id="page-heading">Operations Overview</h1>
+        </div>
+        <div class="topbar-right">
+          <!-- TinyFish Integration Status Badge -->
+          <div class="live-badge" id="topbar-tinyfish-status" title="TinyFish Integration Status">
+            <span class="status-dot warn" id="topbar-status-dot"></span>
+            <span id="topbar-status-text">TinyFish: Checking...</span>
+          </div>
+          <!-- Quick Action -->
+          <button class="btn btn-primary" id="btn-quick-new-case">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>New Case</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- View Containers -->
+      <div class="page-container">
+
+        <!-- 1. OVERVIEW VIEW -->
+        <section class="view-section" id="view-overview">
+          <!-- KPI Cards Grid -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Total Cases</div>
+              <div class="kpi-value" id="kpi-total-cases">0</div>
+              <div class="kpi-sub"><span id="kpi-open-cases">0</span> Active Investigations</div>
+            </div>
+            <div class="kpi-card accent-emerald">
+              <div class="kpi-label">Evidence Preserved</div>
+              <div class="kpi-value" id="kpi-total-evidence">0</div>
+              <div class="kpi-sub"><span id="kpi-verified-evidence">0</span> Baseline SHA-256 Verified</div>
+            </div>
+            <div class="kpi-card accent-orange">
+              <div class="kpi-label">Integrity Status</div>
+              <div class="kpi-value" id="kpi-failed-integrity" style="color: #10b981;">0 Flags</div>
+              <div class="kpi-sub">Cryptographic Mismatch Alerts</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">TinyFish Lookups</div>
+              <div class="kpi-value" id="kpi-total-lookups">0</div>
+              <div class="kpi-sub">Threat Intel Records Cached</div>
+            </div>
+          </div>
+
+          <!-- Quick Actions Panel -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                Incident Response Quick Actions
+              </div>
+            </div>
+            <div style="display: flex; gap: 14px; flex-wrap: wrap;">
+              <button class="btn btn-primary" id="qa-new-case">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Create DFIR Case
+              </button>
+              <button class="btn btn-secondary" id="qa-upload-evidence">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Acquire Evidence
+              </button>
+              <button class="btn btn-orange" id="qa-threat-lookup">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                Research Indicator (TinyFish)
+              </button>
+              <button class="btn btn-secondary" id="qa-generate-report">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                Generate Forensic Report
+              </button>
+            </div>
+          </div>
+
+          <!-- Two-Column Feed Grid -->
+          <div class="grid-2col">
+            <!-- Recent Timeline Events -->
+            <div class="panel">
+              <div class="panel-header">
+                <div class="panel-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                  Recent Investigation Activity
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-view-all-timeline">View All</button>
+              </div>
+              <div id="overview-recent-activity">
+                <div class="empty-state">
+                  <div class="empty-state-text">No recent investigation events recorded.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Recent Threat Intelligence Queries -->
+            <div class="panel">
+              <div class="panel-header">
+                <div class="panel-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                  Recent Threat Lookups
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-view-all-intel">Open Console</button>
+              </div>
+              <div id="overview-recent-lookups">
+                <div class="empty-state">
+                  <div class="empty-state-text">No threat intelligence queries run yet.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. CASES VIEW -->
+        <section class="view-section" id="view-cases" style="display: none;">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path></svg>
+                Incident Response Cases
+              </div>
+              <div style="display: flex; gap: 10px;">
+                <!-- Status Filter Buttons -->
+                <div style="display: flex; gap: 6px;" id="case-status-filters">
+                  <button class="btn btn-secondary btn-sm active-filter" data-filter="">All</button>
+                  <button class="btn btn-secondary btn-sm" data-filter="OPEN">Open</button>
+                  <button class="btn btn-secondary btn-sm" data-filter="INVESTIGATING">Investigating</button>
+                  <button class="btn btn-secondary btn-sm" data-filter="CONTAINED">Contained</button>
+                  <button class="btn btn-secondary btn-sm" data-filter="CLOSED">Closed</button>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-cases-create">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  New Case
+                </button>
+              </div>
+            </div>
+
+            <div class="table-responsive">
+              <table class="cyber-table" id="cases-table">
+                <thead>
+                  <tr>
+                    <th>Case Number</th>
+                    <th>Title</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>Lead Investigator</th>
+                    <th>Evidence</th>
+                    <th>Lookups</th>
+                    <th>Last Updated</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="cases-table-body">
+                  <tr>
+                    <td colspan="9" class="empty-state">Loading cases...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. DIGITAL EVIDENCE VIEW -->
+        <section class="view-section" id="view-evidence" style="display: none;">
+          <!-- Evidence Upload Card -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Secure Evidence Acquisition
+              </div>
+            </div>
+            <form id="form-upload-evidence">
+              <div class="grid-2col">
+                <div>
+                  <div class="form-group">
+                    <label class="form-label" for="evidence-case-select">Associated Case *</label>
+                    <select class="form-control" id="evidence-case-select" required>
+                      <option value="">Select Target Case...</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="evidence-investigator">Acquiring Investigator *</label>
+                    <input type="text" class="form-control" id="evidence-investigator" value="Lead Investigator" required>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="evidence-description">Evidence Notes / Source Description</label>
+                    <textarea class="form-control" id="evidence-description" placeholder="e.g. Memory dump, web server log snapshot, suspect binary from infected workstation"></textarea>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="form-group">
+                    <label class="form-label">Evidence File *</label>
+                    <div class="dropzone" id="evidence-dropzone">
+                      <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                      </svg>
+                      <div class="dropzone-title" id="dropzone-label">Click to select or drag & drop evidence file</div>
+                      <div class="dropzone-hint">Files stored safely outside web static roots. SHA-256 computed on ingest.</div>
+                      <input type="file" id="evidence-file-input" style="display: none;" required>
+                    </div>
+                  </div>
+                  <!-- Client-side computed hash preview -->
+                  <div id="client-hash-preview" style="display: none; margin-top: 10px;" class="alert alert-info">
+                    <div style="font-size: 11px;"><b>Selected File:</b> <span id="client-file-name">-</span> (<span id="client-file-size">-</span>)</div>
+                    <div style="font-size: 10.5px; margin-top: 3px;" class="font-mono"><b>Pre-calculated SHA-256:</b> <span id="client-file-hash">Calculating...</span></div>
+                  </div>
+                  <div style="margin-top: 14px; text-align: right;">
+                    <button type="submit" class="btn btn-primary" id="btn-submit-evidence">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                      Acquire &amp; Hash Evidence
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- Evidence Inventory Table -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+                Digital Evidence Repository &amp; Integrity Baseline
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-evidence">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                Refresh
+              </button>
+            </div>
+
+            <div class="table-responsive">
+              <table class="cyber-table" id="evidence-table">
+                <thead>
+                  <tr>
+                    <th>Case #</th>
+                    <th>Filename</th>
+                    <th>Size</th>
+                    <th>SHA-256 Hash</th>
+                    <th>Acquired Date</th>
+                    <th>Integrity Status</th>
+                    <th>Last Verified</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="evidence-table-body">
+                  <tr>
+                    <td colspan="8" class="empty-state">Loading evidence...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. THREAT INTELLIGENCE (TINYFISH) VIEW -->
+        <section class="view-section" id="view-threat-intel" style="display: none;">
+          <!-- TinyFish Console Header -->
+          <div class="search-console-header">
+            <div>
+              <div style="font-size: 16px; font-weight: 700; color: #ffffff; display: flex; align-items: center; gap: 8px;">
+                <span>TinyFish Threat Intelligence Research Console</span>
+                <span class="indicator-badge" id="console-status-pill">API Ready</span>
+              </div>
+              <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">
+                Direct live search against <code>https://api.search.tinyfish.ai</code> for cybersecurity advisories, C2 indicators, and vendor reports.
+              </div>
+            </div>
+            <div id="console-key-badge" class="badge badge-open">
+              Authenticating via Server X-API-Key
+            </div>
+          </div>
+
+          <!-- Research Query Card -->
+          <div class="panel">
+            <form id="form-threat-search">
+              <div class="grid-2col">
+                <div>
+                  <div class="form-group">
+                    <label class="form-label" for="intel-indicator-input">Suspicious Indicator (IP, Domain, URL, Hash, CVE) *</label>
+                    <div style="display: flex; gap: 8px;">
+                      <input type="text" class="form-control font-mono" id="intel-indicator-input" placeholder="e.g. 185.220.101.5, evil-phish.com, CVE-2024-38077, 44d88612fea8a8f36de82e1278abb02f" required>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btn-detect-indicator">Classify</button>
+                    </div>
+                  </div>
+
+                  <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                    <span class="badge badge-open" id="indicator-type-badge">Type: Auto-Detect</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label" for="intel-case-select">Attach Leads to Case (Optional)</label>
+                    <select class="form-control" id="intel-case-select">
+                      <option value="">No case (Standalone Intelligence Research)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="form-group">
+                    <label class="form-label" for="intel-domain-type">Source Domain Type</label>
+                    <select class="form-control" id="intel-domain-type">
+                      <option value="web" selected>Web Search (Advisories, Vendor Repos, GitHub, Forensics)</option>
+                      <option value="news">News &amp; Threat Reports (Recent Publisher Articles)</option>
+                      <option value="research_paper">Academic &amp; Whitepapers</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label" for="intel-purpose-input">Research Purpose (TinyFish Intent Tuning)</label>
+                    <input type="text" class="form-control" id="intel-purpose-input" placeholder="e.g. Investigating malicious C2 traffic in incident response">
+                  </div>
+
+                  <div style="text-align: right; margin-top: 24px;">
+                    <button type="submit" class="btn btn-orange" id="btn-execute-threat-search">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                      Execute TinyFish Query
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- Intelligence Disclaimer Notice -->
+          <div class="intel-disclaimer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; margin-top: 1px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <div>
+              <b>Forensic Methodology Notice:</b> TinyFish Search results provide open-source threat intelligence (OSINT) and external advisories. External mentions are leads that require internal verification and do not inherently prove malicious intent or compromise on their own. Private evidence bytes are never submitted to search queries.
+            </div>
+          </div>
+
+          <!-- Search Results Stream -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                Search Results &amp; Intelligence Leads
+              </div>
+              <div id="intel-results-counter" style="font-size: 11.5px; color: var(--text-dim);">
+                Awaiting query...
+              </div>
+            </div>
+            <div id="intel-results-container">
+              <div class="empty-state">
+                <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <div class="empty-state-text">Enter an indicator (IP, domain, hash, or CVE) and click 'Execute TinyFish Query' to retrieve live intelligence leads.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stored Lookups History -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                Historical Research Queries
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="cyber-table" id="intel-history-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Case #</th>
+                    <th>Indicator</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Leads Count</th>
+                    <th>Investigator</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="intel-history-table-body">
+                  <tr>
+                    <td colspan="8" class="empty-state">No search history recorded yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. INVESTIGATION TIMELINE VIEW -->
+        <section class="view-section" id="view-timeline" style="display: none;">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                Master Forensic Investigation Audit Log
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-timeline">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                Refresh
+              </button>
+            </div>
+            <div class="timeline-list" id="global-timeline-container">
+              <div class="empty-state">Loading timeline events...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. FORENSIC REPORTS VIEW -->
+        <section class="view-section" id="view-reports" style="display: none;">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                Generate Forensic Investigation Dossier (PDF)
+              </div>
+            </div>
+            <form id="form-generate-report">
+              <div class="grid-2col">
+                <div>
+                  <div class="form-group">
+                    <label class="form-label" for="report-case-select">Select Case for Dossier Compilation *</label>
+                    <select class="form-control" id="report-case-select" required>
+                      <option value="">Select Case...</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="report-investigator">Lead Investigator / Signatory *</label>
+                    <input type="text" class="form-control" id="report-investigator" value="Lead Cyber Investigator" required>
+                  </div>
+                </div>
+
+                <div>
+                  <div style="background: rgba(11, 17, 32, 0.6); border: 1px solid var(--border-card); padding: 18px; border-radius: var(--radius-sm); margin-bottom: 18px;">
+                    <div style="font-size: 12px; font-weight: 700; color: #ffffff; margin-bottom: 6px;">Included in Official Report:</div>
+                    <ul style="font-size: 11.5px; color: var(--text-muted); padding-left: 18px; line-height: 1.8;">
+                      <li>Case metadata, severity classification, and status workflow</li>
+                      <li>Executive incident summary &amp; analyst findings</li>
+                      <li>Cryptographic evidence inventory with SHA-256 baseline hashes</li>
+                      <li>Integrity verification check logs and baseline match status</li>
+                      <li>Source-backed TinyFish threat intelligence leads with URLs</li>
+                      <li>Full chronological investigation event audit trail</li>
+                      <li>Forensic boundaries disclaimer &amp; methodology statement</li>
+                    </ul>
+                  </div>
+                  <div style="text-align: right;">
+                    <button type="submit" class="btn btn-primary" id="btn-compile-pdf">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                      Compile Forensic PDF Report
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- Report Download Results Card -->
+          <div class="panel" id="report-download-card" style="display: none;">
+            <div class="panel-header">
+              <div class="panel-title" style="color: var(--success);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Report Compiled Successfully
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+              <div>
+                <div style="font-weight: 700; color: #ffffff; font-size: 14px;" id="report-res-filename">Report.pdf</div>
+                <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 3px;" id="report-res-meta">Size: - | Generated: -</div>
+              </div>
+              <div>
+                <a href="#" class="btn btn-primary" id="report-download-btn" target="_blank" download>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Download PDF Report
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. SETTINGS & INTEGRATION VIEW -->
+        <section class="view-section" id="view-settings" style="display: none;">
+          <!-- TinyFish Integration Status Card -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                TinyFish API Integration Status
+              </div>
+              <button class="btn btn-outline-cyan btn-sm" id="btn-test-tinyfish-settings">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                Test Connectivity Now
+              </button>
+            </div>
+
+            <div class="grid-2col">
+              <div>
+                <table class="cyber-table">
+                  <tbody>
+                    <tr>
+                      <td style="color: var(--text-dim); width: 180px;">Integration Status</td>
+                      <td><span class="badge badge-open" id="settings-status-badge">Checking...</span></td>
+                    </tr>
+                    <tr>
+                      <td style="color: var(--text-dim);">API Endpoint</td>
+                      <td><code class="font-mono" id="settings-endpoint">https://api.search.tinyfish.ai</code></td>
+                    </tr>
+                    <tr>
+                      <td style="color: var(--text-dim);">API Key Configuration</td>
+                      <td><span class="font-mono" id="settings-key-status">Protected</span></td>
+                    </tr>
+                    <tr>
+                      <td style="color: var(--text-dim);">Last Verified</td>
+                      <td><span id="settings-last-tested">Never tested in this session</span></td>
+                    </tr>
+                    <tr>
+                      <td style="color: var(--text-dim);">Hosted MCP Server</td>
+                      <td><code class="font-mono">https://agent.tinyfish.ai/mcp</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <div style="background: rgba(11, 17, 32, 0.6); border: 1px solid var(--border-card); padding: 18px; border-radius: var(--radius-sm);">
+                  <div style="font-size: 13px; font-weight: 700; color: #ffffff; margin-bottom: 8px;">
+                    Configuring or Rotating your TinyFish Key
+                  </div>
+                  <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+                    1. Obtain your API key from <a href="https://agent.tinyfish.ai/api-keys" target="_blank" rel="noopener" style="color: var(--cyan-primary);">agent.tinyfish.ai/api-keys</a>.<br/>
+                    2. In the workspace root, copy <code>.env.example</code> to <code>.env</code> (excluded from Git).<br/>
+                    3. Set: <code>TINYFISH_API_KEY=sk-...</code><br/>
+                    4. Restart the server or click <b>Test Connectivity Now</b> above.<br/>
+                    <br/>
+                    <span style="color: #fbbf24;">Note: Never share or commit your key in chat or public repositories.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Test Output Box -->
+            <div id="settings-test-output" style="display: none; margin-top: 18px;" class="alert alert-info">
+              <!-- Live output injected here -->
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Create Case Modal -->
+  <div class="modal-backdrop" id="modal-create-case">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">Initialize Digital Forensics Case</div>
+        <button class="modal-close" data-close-modal="modal-create-case">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <form id="form-create-case">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="case-title-input">Case Title *</label>
+            <input type="text" class="form-control" id="case-title-input" placeholder="e.g. Finance Server Ransomware Infiltration" required>
+          </div>
+          <div class="grid-2col">
+            <div class="form-group">
+              <label class="form-label" for="case-severity-input">Severity Classification *</label>
+              <select class="form-control" id="case-severity-input" required>
+                <option value="CRITICAL">CRITICAL — High Impact Active Breach</option>
+                <option value="HIGH">HIGH — Critical Asset Compromise</option>
+                <option value="MEDIUM" selected>MEDIUM — Suspicious Activity / Phish</option>
+                <option value="LOW">LOW — Routine Indicator Triage</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="case-investigator-input">Lead Investigator *</label>
+              <input type="text" class="form-control" id="case-investigator-input" value="Lead Cyber Investigator" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="case-desc-input">Initial Incident Description &amp; Scope</label>
+            <textarea class="form-control" id="case-desc-input" placeholder="Provide background on the incident, affected systems, initial vectors, and timeline objectives."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-create-case">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-case">Initialize Case</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Case Dossier / Detail Modal -->
+  <div class="modal-backdrop" id="modal-case-detail">
+    <div class="modal-dialog" style="max-width: 800px;">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="dossier-case-number">TM-2026-001</div>
+          <div style="font-size: 11.5px; color: var(--text-cyan);" id="dossier-case-title">Case Title</div>
+        </div>
+        <button class="modal-close" data-close-modal="modal-case-detail">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- Status & Severity Controls -->
+        <div style="display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; justify-content: space-between; background: rgba(8, 12, 20, 0.4); padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-card);">
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-dim);">STATUS:</label>
+            <select class="form-control" id="dossier-status-select" style="width: auto; padding: 4px 8px; font-size: 12px;">
+              <option value="OPEN">OPEN</option>
+              <option value="INVESTIGATING">INVESTIGATING</option>
+              <option value="CONTAINED">CONTAINED</option>
+              <option value="CLOSED">CLOSED</option>
+            </select>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-dim);">SEVERITY:</label>
+            <select class="form-control" id="dossier-severity-select" style="width: auto; padding: 4px 8px; font-size: 12px;">
+              <option value="CRITICAL">CRITICAL</option>
+              <option value="HIGH">HIGH</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="LOW">LOW</option>
+            </select>
+          </div>
+          <div>
+            <button class="btn btn-secondary btn-sm" id="btn-save-dossier-status">Update Case</button>
+          </div>
+        </div>
+
+        <!-- Description -->
+        <div style="margin-bottom: 18px;">
+          <div class="form-label">Incident Synopsis</div>
+          <div style="font-size: 12.5px; color: var(--text-muted); background: var(--bg-input); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-card);" id="dossier-description">
+            -
+          </div>
+        </div>
+
+        <!-- Evidence in this Case -->
+        <div style="margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <div class="form-label" style="margin-bottom: 0;">Preserved Evidence Files</div>
+            <button class="btn btn-outline-cyan btn-sm" id="btn-dossier-add-evidence">+ Add Evidence</button>
+          </div>
+          <div id="dossier-evidence-list">
+            <div class="empty-state" style="padding: 14px;">No evidence attached yet.</div>
+          </div>
+        </div>
+
+        <!-- Investigator Notes -->
+        <div style="margin-bottom: 20px;">
+          <div class="form-label">Analyst Findings &amp; Notes</div>
+          <div id="dossier-notes-list" style="margin-bottom: 10px; max-height: 160px; overflow-y: auto;">
+            <!-- Injected notes -->
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" class="form-control" id="dossier-new-note" placeholder="Enter investigation observation or finding...">
+            <button class="btn btn-secondary btn-sm" id="btn-dossier-add-note">Add Note</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-modal="modal-case-detail">Close</button>
+        <button type="button" class="btn btn-primary" id="btn-dossier-generate-pdf">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+          Export Forensic Report (PDF)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

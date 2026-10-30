@@ -1,4 +1,4 @@
-# JOCKY DFIR Gateway — Implementation & Verification Status (B1–B12)
+# Tiny Monitor — Implementation & Verification Status (B1–B12)
 
 **Evaluation Date:** 2026-09-24  
 **Operating System:** Target endpoint is detected at runtime (Windows or Linux); no host identity is bundled.  

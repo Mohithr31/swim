@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B8 Filesystem Forensics Engine
+Tiny Monitor — B8 Filesystem Forensics Engine
 Triage and recursive inventory of user folders (Desktop, Documents, Downloads, Pictures, Videos, Music).
 Collects file attributes, timestamps, hashes, owner, permissions, and small-file preview safely.
 Windows Volume Shadow Copy (VSS) discovery with strict permission and state reporting.

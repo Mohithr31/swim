@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B2 Application Forensics Engine
+Tiny Monitor — B2 Application Forensics Engine
 Real local application discovery across Windows, Linux, and macOS.
 Collects: Installed applications, running processes, execution evidence,
 prefetch artifacts, UserAssist, AmCache, recent files, Recycle Bin metadata,

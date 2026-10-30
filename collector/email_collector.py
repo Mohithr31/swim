@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B4 Email Forensics Engine
+Tiny Monitor — B4 Email Forensics Engine
 Safe local discovery of email clients, profiles, mailboxes (PST, OST, MBOX, EML, MSG),
 message metadata, and attachment metadata across Windows, Linux, and macOS.
 Defensively extracts metadata (sender, recipient, subject, timestamp, attachments)

@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — Comprehensive Forensic Collection Runner
+Tiny Monitor — Comprehensive Forensic Collection Runner
 Orchestrates B1-B10 artifact collectors, normalizes evidence records,
 writes directly into SQLite database using fast batch transactions,
 and generates evidence packaging with manifest.json.

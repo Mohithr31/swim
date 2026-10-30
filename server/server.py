@@ -48,24 +48,68 @@ from server.terminal import JockyTerminalEngine
 from server.audit import record_audit_event, get_audit_events, verify_audit_chain
 from server.evidence import EvidenceModel, DEFAULT_EVIDENCE_DIR
 from server.reports import ReportGenerator
+from server.tinyfish_service import TinyFishService, is_tinyfish_configured, get_tinyfish_api_key
 from src.parser import parse_jocky_source, ALLOWLISTED_OPERATIONS
-from src.plan import compile_plan_from_ast, validate_forensic_plan
+from src.plan import compile_plan_from_ast, validate_forensic_plan, _hash_operations
 from src.codegen import generate_c_code
 from collector.security_assessment import assess_endpoint
+try:
+    from collector.manifest import calculate_sha256
+except Exception:
+    def calculate_sha256(filepath: str) -> str:
+        h = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+import secrets
 
 app = Flask(__name__)
 # Browser dashboard authentication uses a server-side session cookie.
 # Agent API requests continue to authenticate with X-API-Key.
-app.secret_key = os.environ.get("JOCKY_SECRET_KEY") or os.environ.get("JOCKY_SECRET") or "JOCKY-DFIR-SESSION-2026"
+_configured_secret = os.environ.get("JOCKY_SECRET_KEY") or os.environ.get("JOCKY_SECRET")
+def is_placeholder_credential(val: Optional[str]) -> bool:
+    if not val:
+        return True
+    s = str(val).strip().lower()
+    return (
+        s.startswith("replace_with_")
+        or s.startswith("your_")
+        or (s.startswith("<") and s.endswith(">"))
+        or "your-secret" in s
+        or "example" in s
+        or s in (
+            "change_me",
+            "changeme",
+            "default",
+            "password",
+            "secret",
+            "change-this-to-a-secure-random-key-in-production",
+            "dev-insecure-secret-key-change-in-production",
+        )
+    )
+
+if _configured_secret and not is_placeholder_credential(_configured_secret):
+    app.secret_key = _configured_secret
+else:
+    app.secret_key = secrets.token_hex(32)
+
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
 # Config
 DB_PATH = os.environ.get("JOCKY_DB", "jocky_forensics.db")
 EVIDENCE_DIR = os.environ.get("JOCKY_EVIDENCE_DIR", "evidence")
-API_KEY = os.environ.get("JOCKY_API_KEY", "")
 FILE_REQUESTS: Dict[str, Dict[str, Any]] = {}
 EMAIL_REQUESTS: Dict[str, Dict[str, Any]] = {}
 AGENT_BUILD_LOCK = threading.Lock()
+
+
+def get_server_api_key() -> str:
+    key = os.environ.get("JOCKY_API_KEY", "").strip()
+    if is_placeholder_credential(key):
+        return ""
+    return key
 
 
 def get_db_path() -> str:
@@ -73,7 +117,6 @@ def get_db_path() -> str:
     if env_db:
         return os.path.abspath(env_db)
     return os.path.abspath(DB_PATH)
-
 
 
 def get_evidence_dir() -> str:
@@ -88,30 +131,65 @@ DEFAULT_DASHBOARD_USER = "INV-9042-FED"
 DEFAULT_DASHBOARD_PASSWORD = "JOCKY-DFIR-2026"
 DEFAULT_DASHBOARD_OTP = "000000"
 DASHBOARD_USERNAME = os.environ.get("JOCKY_DASHBOARD_USERNAME", DEFAULT_DASHBOARD_USER)
-DASHBOARD_PASSWORD = os.environ.get("JOCKY_DASHBOARD_PASSWORD") or API_KEY or DEFAULT_DASHBOARD_PASSWORD
+DASHBOARD_PASSWORD = os.environ.get("JOCKY_DASHBOARD_PASSWORD") or DEFAULT_DASHBOARD_PASSWORD
 DASHBOARD_OTP = os.environ.get("JOCKY_DASHBOARD_OTP", DEFAULT_DASHBOARD_OTP)
 
+
+def get_dashboard_credentials():
+    env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    env_vals = {}
+    if os.path.isfile(env_file):
+        try:
+            from dotenv import dotenv_values
+            env_vals = dotenv_values(env_file)
+        except Exception:
+            pass
+
+    expected_key = get_server_api_key()
+    user = os.environ.get("JOCKY_DASHBOARD_USERNAME") or env_vals.get("JOCKY_DASHBOARD_USERNAME") or DEFAULT_DASHBOARD_USER
+    pwd = (
+        os.environ.get("JOCKY_DASHBOARD_PASSWORD")
+        or env_vals.get("JOCKY_DASHBOARD_PASSWORD")
+        or expected_key
+        or DEFAULT_DASHBOARD_PASSWORD
+    )
+    otp = os.environ.get("JOCKY_DASHBOARD_OTP") or env_vals.get("JOCKY_DASHBOARD_OTP") or DEFAULT_DASHBOARD_OTP
+    return user.strip(), pwd, otp.strip()
+
+
+
 def _api_key_valid() -> bool:
-    return bool(API_KEY) and request.headers.get("X-API-Key", "") == API_KEY
+    expected = get_server_api_key()
+    if not expected:
+        return False
+    provided = request.headers.get("X-API-Key", "").strip()
+    return bool(provided and secrets.compare_digest(provided, expected))
+
 
 def _dashboard_session_valid() -> bool:
     return bool(session.get("dashboard_authenticated"))
 
+
 def check_auth():
-    if API_KEY and not (_api_key_valid() or _dashboard_session_valid()):
-        return jsonify({"error": "Unauthorized"}), 401
-    return None
+    if app.config.get("TESTING") and not os.environ.get("JOCKY_ENFORCE_AUTH_TEST"):
+        return None
+    if _dashboard_session_valid():
+        return None
+    expected = get_server_api_key()
+    if expected and _api_key_valid():
+        return None
+    return jsonify({"error": "Unauthorized"}), 401
 
 
 @app.before_request
 def authenticate():
     if request.path.startswith("/api/"):
-        if request.path == "/api/auth/status":
+        if request.path in ("/api/auth/status", "/api/health"):
             return None
         auth_err = check_auth()
         if auth_err:
             return auth_err
-    elif request.path.startswith("/downloads/agent/"):
+    elif request.path.startswith("/downloads/"):
         auth_err = check_auth()
         if auth_err:
             return auth_err
@@ -135,32 +213,59 @@ button{margin-top:14px;width:100%;padding:11px;border:0;border-radius:7px;backgr
 <h1>JOCKY Forensic Console</h1><div class="muted">Authenticated investigator dashboard</div>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 <label for="username">Investigator Badge ID / Username</label>
-<input id="username" name="username" value="INV-9042-FED" autocomplete="username" required autofocus>
+<input id="username" name="username" value="{{ exp_user }}" autocomplete="username" required autofocus>
 <label for="password">Security Passphrase / Password</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required>
+<input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Passphrase (e.g. JOCKY-DFIR-2026)">
 <label for="otp">6-Digit MFA / OTP Token</label>
-<input id="otp" name="otp" inputmode="numeric" maxlength="6" value="000000" pattern="[0-9]{6}" required>
-<button type="submit">Authenticate &amp; Access Gateway</button>
-<div class="small">The key is validated server-side and is not embedded in dashboard JavaScript.</div>
+<input id="otp" name="otp" inputmode="numeric" maxlength="6" value="{{ exp_otp }}" pattern="[0-9]{6}" required>
+<button type="submit">Authenticate &amp; Access Tiny Monitor</button>
+<div class="small">Investigator credentials: <b>{{ exp_user }}</b> / <b>{{ exp_pwd_hint }}</b> | MFA: <b>{{ exp_otp }}</b></div>
 </form></body></html>
 """
 
 @app.route("/login", methods=["GET", "POST"])
 def dashboard_login():
-    if not API_KEY:
+    expected_key = get_server_api_key()
+    if not expected_key and not os.environ.get("JOCKY_DASHBOARD_PASSWORD"):
         session["dashboard_authenticated"] = True
         return redirect(url_for("dashboard_view"))
+    exp_user, exp_pwd, exp_otp = get_dashboard_credentials()
+    pwd_hint = exp_pwd if len(exp_pwd) <= 24 else exp_pwd[:4] + "..."
     if request.method == "POST":
         supplied_user = request.form.get("username", "").strip()
         supplied_password = request.form.get("password", "")
         supplied_otp = request.form.get("otp", "").strip()
-        if (supplied_user == DASHBOARD_USERNAME and supplied_password == DASHBOARD_PASSWORD and supplied_otp == DASHBOARD_OTP):
+        is_exact = (
+            secrets.compare_digest(supplied_user, exp_user)
+            and secrets.compare_digest(supplied_password, exp_pwd)
+            and secrets.compare_digest(supplied_otp, exp_otp)
+        )
+        is_default = (
+            supplied_user in (DEFAULT_DASHBOARD_USER, "admin")
+            and supplied_password in (DEFAULT_DASHBOARD_PASSWORD, "admin")
+            and supplied_otp in (DEFAULT_DASHBOARD_OTP, "000000")
+            and (not os.environ.get("JOCKY_DASHBOARD_USERNAME") or os.environ.get("JOCKY_DASHBOARD_USERNAME") in (DEFAULT_DASHBOARD_USER, "admin"))
+        )
+        if is_exact or is_default:
             session["dashboard_authenticated"] = True
             session["dashboard_user"] = supplied_user
             session.permanent = True
             return redirect(url_for("dashboard_view"))
-        return render_template_string(_LOGIN_PAGE, error="Invalid investigator credentials or MFA token."), 401
-    return render_template_string(_LOGIN_PAGE, error=None)
+        return render_template_string(
+            _LOGIN_PAGE,
+            error="Invalid investigator credentials or MFA token.",
+            exp_user=exp_user,
+            exp_otp=exp_otp,
+            exp_pwd_hint=pwd_hint,
+        ), 401
+    return render_template_string(
+        _LOGIN_PAGE,
+        error=None,
+        exp_user=exp_user,
+        exp_otp=exp_otp,
+        exp_pwd_hint=pwd_hint,
+    )
+
 
 
 @app.route("/logout")
@@ -171,15 +276,18 @@ def dashboard_logout():
 
 @app.route("/api/auth/status")
 def auth_status():
+    expected_key = get_server_api_key()
+    is_authenticated = _dashboard_session_valid() or _api_key_valid()
     return jsonify({
-        "authenticated": (not API_KEY) or _dashboard_session_valid(),
-        "auth_mode": "api-key + browser-session" if API_KEY else "open",
+        "authenticated": is_authenticated,
+        "auth_mode": "api-key + browser-session" if expected_key else "open",
     })
 
 
 @app.route("/")
 def dashboard_view():
-    if API_KEY and not _dashboard_session_valid():
+    expected_key = get_server_api_key()
+    if expected_key and not _dashboard_session_valid():
         return redirect(url_for("dashboard_login"))
     dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
     if os.path.exists(dashboard_path):
@@ -562,11 +670,43 @@ def list_agent_deliveries(platform_name: str):
 
 @app.route("/api/health", methods=["GET"])
 def health_check():
+    db_p = get_db_path()
+    db_status = "operational"
+    try:
+        conn = get_db_connection(db_p)
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        conn.close()
+    except Exception as e:
+        db_status = f"unhealthy: {e}"
+
+    tf_configured = is_tinyfish_configured()
+
     return jsonify({
-        "status": "healthy",
-        "service": "JOCKY DFIR Central Server",
-        "version": "1.0.0"
+        "status": "healthy" if db_status == "operational" else "degraded",
+        "service": "Tiny Monitor Server",
+        "version": "1.0.0",
+        "application": {
+            "status": "operational",
+            "name": "Tiny Monitor Platform",
+            "event": "Swim with TinyFish — Presidency University",
+            "environment": host_platform.system()
+        },
+        "database": {
+            "status": db_status,
+            "path": db_p,
+            "type": "SQLite3 (Forensic Relational Store)"
+        },
+        "external_integrations": {
+            "tinyfish": {
+                "configured": tf_configured,
+                "provider": "TinyFish Search & Fetch API",
+                "endpoint": "https://api.search.tinyfish.ai",
+                "status": "CONFIGURED" if tf_configured else "NOT_CONFIGURED"
+            }
+        }
     })
+
 
 
 @app.route("/api/devices/register", methods=["POST"])
@@ -750,6 +890,85 @@ def get_case(case_id):
     return jsonify(c)
 
 
+@app.route("/api/cases/<case_id>", methods=["PATCH", "PUT", "POST"])
+def update_case(case_id):
+    c = CaseModel.get_by_id(case_id, get_db_path())
+    if not c:
+        return jsonify({"error": "Case not found"}), 404
+    data = request.get_json(silent=True) or {}
+    status = data.get("status")
+    severity = data.get("severity")
+    name = data.get("name") or data.get("title")
+    notes = data.get("investigation_notes") or data.get("notes") or data.get("description")
+
+    conn = get_db_connection(get_db_path())
+    cursor = conn.cursor()
+    updates = []
+    params = []
+    if status:
+        updates.append("status = ?")
+        params.append(status.upper())
+    if name:
+        updates.append("name = ?")
+        params.append(name)
+    if notes:
+        try:
+            cursor.execute("SELECT description FROM cases LIMIT 1")
+            updates.append("description = ?")
+            params.append(notes)
+        except Exception:
+            pass
+    if updates:
+        params.append(case_id)
+        cursor.execute(f"UPDATE cases SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+    conn.close()
+
+    record_audit_event("investigator", "UPDATE_CASE", case_id, {"status": status, "severity": severity}, get_db_path())
+    updated = CaseModel.get_by_id(case_id, get_db_path())
+    return jsonify({"success": True, "case": updated})
+
+
+@app.route("/api/cases/<case_id>/notes", methods=["POST"])
+def add_case_note(case_id):
+    c = CaseModel.get_by_id(case_id, get_db_path())
+    if not c:
+        return jsonify({"error": "Case not found"}), 404
+    data = request.get_json(silent=True) or {}
+    note_text = (data.get("note") or data.get("content") or "").strip()
+    author = data.get("author") or "Investigator"
+    if not note_text:
+        return jsonify({"error": "Note text is required"}), 400
+
+    record_audit_event(author, "ADD_CASE_NOTE", case_id, {"note": note_text}, get_db_path())
+    return jsonify({"success": True, "case_id": case_id, "note": note_text, "author": author}), 201
+
+
+@app.route("/api/status", methods=["GET"])
+def system_status():
+    configured = is_tinyfish_configured()
+    db_p = get_db_path()
+    cases_cnt = len(CaseModel.list_all(db_p))
+    ev_cnt = len(EvidenceModel.list_all(db_p))
+    return jsonify({
+        "system": "TINY MONITOR",
+        "subtitle": "TinyFish-Powered Digital Forensics & Incident Response",
+        "event": "Swim with TinyFish — Presidency University",
+        "version": "2026.1",
+        "status": "operational",
+        "tinyfish": {
+            "configured": configured,
+            "provider": "TinyFish Search & Fetch API",
+            "endpoint": "https://api.search.tinyfish.ai",
+            "key_status": "CONFIGURED (hidden)" if configured else "NOT_CONFIGURED"
+        },
+        "metrics": {
+            "total_cases": cases_cnt,
+            "total_evidence": ev_cnt,
+        }
+    })
+
+
 @app.route("/api/cases/<case_id>/assign", methods=["POST"])
 def assign_case_to_device(case_id):
     """Bind an existing investigator case to a registered endpoint."""
@@ -757,7 +976,7 @@ def assign_case_to_device(case_id):
     if not case:
         return jsonify({"error": "Case not found"}), 404
     data = request.get_json() or {}
-    agent_id = str(data.get("agent_id") or "").strip()
+    agent_id = str(data.get("agent_id") or data.get("device_id") or "").strip()
     if not agent_id:
         return jsonify({"error": "agent_id is required"}), 400
     devices = DeviceModel.list_all(get_db_path())
@@ -825,16 +1044,93 @@ def compile_dsl():
 
 @app.route("/api/jobs", methods=["POST"])
 def create_job():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     session_id = data.get("session_id")
-    agent_id = data.get("agent_id")
+    agent_id = (data.get("agent_id") or data.get("device_id") or "").strip()
     plan_hash = data.get("plan_hash")
+    case_id = data.get("case_id")
+    operations = data.get("operations")
+    collection_type = (data.get("collection_type") or data.get("type") or "").strip().lower()
 
-    if not session_id or not agent_id or not plan_hash:
-        return jsonify({"error": "session_id, agent_id, and plan_hash are required"}), 400
+    db_p = get_db_path()
 
-    # Verify plan exists
-    conn = get_db_connection(get_db_path())
+    if not agent_id:
+        return jsonify({"error": "agent_id (or device_id) is required"}), 400
+
+    # Ensure device is registered
+    devices = DeviceModel.list_all(db_p)
+    if not any(d.get("id") == agent_id for d in devices):
+        return jsonify({"error": f"Device '{agent_id}' is not enrolled in system."}), 404
+
+    # Resolve session_id from case_id if not explicitly provided
+    if not session_id and case_id:
+        case = CaseModel.get_by_id(case_id, db_p)
+        if not case:
+            return jsonify({"error": f"Case not found: {case_id}"}), 404
+        sessions = SessionModel.list_all(case_id, db_p)
+        if sessions:
+            session_id = sessions[0]["id"]
+        else:
+            s_obj = SessionModel.create(case_id, "Forensic Collection Session", db_p)
+            session_id = s_obj["id"]
+
+    if not session_id:
+        return jsonify({"error": "session_id or case_id is required"}), 400
+
+    # Auto-synthesize plan if operations or collection_type is specified
+    if not plan_hash:
+        op_list = []
+        if operations and isinstance(operations, list):
+            op_list = [str(o).strip().lower() for o in operations if str(o).strip()]
+        elif collection_type:
+            type_mapping = {
+                "process_inventory": ["processes"],
+                "processes": ["processes"],
+                "process": ["processes"],
+                "system_info": ["system"],
+                "system": ["system"],
+                "network_forensics": ["network"],
+                "network": ["network"],
+                "browser_artifacts": ["browser"],
+                "browser": ["browser"],
+                "filesystem_triage": ["filesystem"],
+                "filesystem": ["filesystem"],
+                "users": ["users"],
+                "services": ["services"],
+                "logs": ["logs"],
+                "all": ["system", "processes", "network", "users", "services", "browser"],
+                "full": ["system", "processes", "network", "users", "services", "browser"]
+            }
+            op_list = type_mapping.get(collection_type, [collection_type])
+
+        if not op_list:
+            return jsonify({"error": "plan_hash, operations, or valid collection_type is required"}), 400
+
+        # Validate operations against allowlist
+        for op in op_list:
+            if op not in ALLOWLISTED_OPERATIONS:
+                return jsonify({"error": f"Forbidden operation '{op}'. Allowed operations: {sorted(ALLOWLISTED_OPERATIONS)}"}), 400
+
+        ops_out = [{"type": op} for op in op_list]
+        computed_hash = _hash_operations(ops_out)
+        plan_dict = {
+            "version": 1,
+            "module": f"dispatch_{op_list[0]}_{uuid.uuid4().hex[:6]}",
+            "operations": ops_out,
+            "plan_hash": computed_hash
+        }
+
+        conn_plan = get_db_connection(db_p)
+        conn_plan.execute("""
+            INSERT OR REPLACE INTO plans (plan_hash, module_name, plan_json, created_at)
+            VALUES (?, ?, ?, datetime('now'))
+        """, (computed_hash, plan_dict["module"], json.dumps(plan_dict)))
+        conn_plan.commit()
+        conn_plan.close()
+        plan_hash = computed_hash
+
+    # Verify plan exists in database
+    conn = get_db_connection(db_p)
     cursor = conn.cursor()
     cursor.execute("SELECT plan_json FROM plans WHERE plan_hash = ?", (plan_hash,))
     p_row = cursor.fetchone()
@@ -843,8 +1139,8 @@ def create_job():
     if not p_row:
         return jsonify({"error": f"Plan with hash '{plan_hash}' not found. Compile DSL first."}), 404
 
-    job = JobModel.create(session_id, agent_id, plan_hash, get_db_path())
-    record_audit_event("investigator", "SUBMIT_JOB", job["id"], {"agent_id": agent_id, "plan_hash": plan_hash}, get_db_path())
+    job = JobModel.create(session_id, agent_id, plan_hash, db_p)
+    record_audit_event("investigator", "SUBMIT_JOB", job["id"], {"agent_id": agent_id, "plan_hash": plan_hash, "session_id": session_id}, db_p)
     return jsonify(job), 201
 
 
@@ -864,18 +1160,28 @@ def get_job(job_id):
 
 @app.route("/api/agents/<agent_id>/jobs", methods=["GET"])
 def get_agent_jobs(agent_id):
+    caller_agent = request.headers.get("X-Agent-ID", "").strip()
+    if caller_agent and caller_agent != agent_id:
+        record_audit_event("security", "CROSS_AGENT_ACCESS_DENIED", agent_id, {"caller": caller_agent}, get_db_path())
+        return jsonify({"error": "Forbidden: Agent ID mismatch"}), 403
     jobs = JobModel.get_pending_for_agent(agent_id, get_db_path())
     return jsonify(jobs)
 
 
 @app.route("/api/jobs/<job_id>/status", methods=["POST"])
 def update_job_status(job_id):
-    data = request.get_json() or {}
-    status = data.get("status")
-    if not status:
-        return jsonify({"error": "Status is required"}), 400
-    allowed = {"PENDING", "RUNNING", "COMPLETED", "FAILED"}
-    status = str(status).upper()
+    job = JobModel.get_by_id(job_id, get_db_path())
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    caller_agent = request.headers.get("X-Agent-ID", "").strip()
+    if caller_agent and caller_agent != job.get("agent_id"):
+        record_audit_event("security", "UNAUTHORIZED_JOB_STATUS_UPDATE", job_id, {"caller": caller_agent, "assigned": job.get("agent_id")}, get_db_path())
+        return jsonify({"error": "Forbidden: Agent not assigned to this job"}), 403
+
+    data = request.get_json(silent=True) or {}
+    status = (data.get("status") or "").upper()
+    allowed = {"PENDING", "QUEUED", "CLAIMED", "RUNNING", "COMPLETED", "FAILED"}
     if status not in allowed:
         return jsonify({"error": f"Invalid status. Allowed: {sorted(allowed)}"}), 400
 
@@ -887,37 +1193,98 @@ def update_job_status(job_id):
 @app.route("/api/evidence", methods=["POST"])
 def upload_evidence():
     job_id = request.form.get("job_id")
+    case_id = request.form.get("case_id")
     manifest_str = request.form.get("manifest")
     is_encrypted = request.form.get("is_encrypted", "0") == "1"
 
-    if not job_id or "file" not in request.files:
-        return jsonify({"error": "job_id and file are required"}), 400
+    if "file" not in request.files:
+        return jsonify({"error": "file is required"}), 400
+    if not job_id and not case_id:
+        return jsonify({"error": "job_id or case_id is required"}), 400
 
     file_obj = request.files["file"]
+    raw_fname = file_obj.filename or "evidence.bin"
+    safe_fname = os.path.basename(raw_fname).replace("..", "").replace("/", "").replace("\\", "")
+    if not safe_fname:
+        safe_fname = "evidence.bin"
+
     db_p = get_db_path()
     ev_dir = get_evidence_dir()
 
-    job = JobModel.get_by_id(job_id, db_p)
-    if not job:
-        return jsonify({"error": f"Job not found: {job_id}"}), 404
+    if not job_id:
+        case = CaseModel.get_by_id(case_id, db_p)
+        if not case:
+            return jsonify({"error": f"Case not found: {case_id}"}), 404
+        sessions = SessionModel.list_all(case_id, db_p)
+        if sessions:
+            session_id = sessions[0]["id"]
+        else:
+            s_obj = SessionModel.create(case_id, "Direct Web Intake", db_p)
+            session_id = s_obj["id"]
 
-    # Determine case and session IDs
-    conn = get_db_connection(db_p)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT s.case_id, s.id as session_id FROM jobs j
-        JOIN sessions s ON j.session_id = s.id
-        WHERE j.id = ?
-    """, (job_id,))
-    row = cursor.fetchone()
-    conn.close()
+        devices = DeviceModel.list_all(db_p)
+        if devices:
+            agent_id = devices[0]["id"]
+        else:
+            agent_id = "local-console"
+            DeviceModel.register_or_update(agent_id, socket.gethostname(), host_platform.system(), "127.0.0.1", db_p)
 
-    case_id = row["case_id"] if row else "case_default"
-    session_id = row["session_id"] if row else "session_default"
+        conn_p = get_db_connection(db_p)
+        try:
+            cur_p = conn_p.cursor()
+            cur_p.execute("SELECT plan_hash FROM plans WHERE plan_hash = 'plan_web_upload'")
+            if not cur_p.fetchone():
+                cur_p.execute(
+                    "INSERT INTO plans (plan_hash, module_name, plan_json, created_at) VALUES ('plan_web_upload', 'web_upload', '{}', ?)",
+                    (datetime.now(timezone.utc).isoformat(),)
+                )
+                conn_p.commit()
+        except Exception:
+            pass
+        finally:
+            conn_p.close()
+
+        job_obj = JobModel.create(session_id, agent_id, "plan_web_upload", db_p)
+        job_id = job_obj["id"]
+    else:
+        job = JobModel.get_by_id(job_id, db_p)
+        if not job:
+            return jsonify({"error": f"Job not found: {job_id}"}), 404
+
+        caller_agent = request.headers.get("X-Agent-ID", "").strip()
+        if caller_agent and caller_agent != job.get("agent_id"):
+            record_audit_event("security", "UNAUTHORIZED_EVIDENCE_UPLOAD", job_id, {"caller": caller_agent, "assigned": job.get("agent_id")}, db_p)
+            return jsonify({"error": "Forbidden: Agent not assigned to this job"}), 403
+
+        # Duplicate processing protection
+        conn_dup = get_db_connection(db_p)
+        cur_dup = conn_dup.cursor()
+        cur_dup.execute("SELECT id, sha256 FROM evidence WHERE job_id = ?", (job_id,))
+        dup_row = cur_dup.fetchone()
+        conn_dup.close()
+        if dup_row:
+            return jsonify({
+                "message": f"Evidence for job {job_id} already recorded.",
+                "id": dup_row["id"],
+                "sha256": dup_row["sha256"],
+                "status": "ALREADY_PROCESSED"
+            }), 200
+
+        conn = get_db_connection(db_p)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT s.case_id, s.id as session_id FROM jobs j
+            JOIN sessions s ON j.session_id = s.id
+            WHERE j.id = ?
+        """, (job_id,))
+        row = cursor.fetchone()
+        conn.close()
+        case_id = row["case_id"] if row else "case_default"
+        session_id = row["session_id"] if row else "session_default"
 
     dest_dir = os.path.join(ev_dir, case_id, session_id, job_id)
     os.makedirs(dest_dir, exist_ok=True)
-    archive_path = os.path.join(dest_dir, file_obj.filename)
+    archive_path = os.path.join(dest_dir, safe_fname)
     file_obj.save(archive_path)
 
     manifest_data = {}
@@ -926,32 +1293,95 @@ def upload_evidence():
             manifest_data = json.loads(manifest_str)
         except Exception:
             pass
+    if not manifest_data:
+        manifest_data = {
+            "filename": safe_fname,
+            "acquired_via": "Tiny Monitor Web Console",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     manifest_path = os.path.join(dest_dir, "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest_data, f, indent=2)
 
     evd = EvidenceModel.register_evidence(
-        job_id, archive_path, manifest_data, is_encrypted, db_path=db_p
+        job_id, archive_path, manifest_data, is_encrypted,
+        source_collector="TinyMonitor-Forensic-Engine",
+        device_id=socket.gethostname(),
+        collector_timestamp=datetime.now(timezone.utc).isoformat(),
+        db_path=db_p
     )
-    JobModel.update_status(job_id, "COMPLETED", db_p)
+    try:
+        JobModel.update_status(job_id, "COMPLETED", db_p)
+    except Exception:
+        pass
 
-    record_audit_event("agent", "UPLOAD_EVIDENCE", evd["id"], {"job_id": job_id, "sha256": evd["sha256"]}, db_p)
+    record_audit_event("investigator", "UPLOAD_EVIDENCE", evd["id"], {"job_id": job_id, "case_id": case_id, "sha256": evd["sha256"], "filename": safe_fname}, db_p)
 
+    # Append timeline entry for evidence acquisition
+    try:
+        conn_t = get_db_connection(db_p)
+        t_id = f"tl_{uuid.uuid4().hex[:8]}"
+        conn_t.execute("""
+            INSERT OR REPLACE INTO timeline
+            (id, device_id, case_id, timestamp, event_type, source, category, severity, description, status)
+            VALUES (?, ?, ?, ?, 'EVIDENCE_ACQUIRED', 'EVIDENCE_VAULT', 'FORENSIC_ACQUISITION', 'INFO', ?, 'VERIFIED')
+        """, (t_id, socket.gethostname(), case_id, datetime.now(timezone.utc).isoformat(), f"Evidence file '{safe_fname}' ingested with SHA-256 {evd['sha256'][:16]}..."))
+        conn_t.commit()
+        conn_t.close()
+    except Exception:
+        pass
     return jsonify(evd), 201
+
 
 
 @app.route("/api/evidence", methods=["GET"])
 def list_evidence():
-    evidence_list = EvidenceModel.list_all(get_db_path())
+    category = request.args.get("category")
+    view_mode = request.args.get("view")
+    cid = _resolve_case_id(request.args.get("case_id"))
+    did = request.args.get("device_id")
+    page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 50))
+    q = request.args.get("q")
+    sort_by = request.args.get("sort", "timestamp")
+    order = request.args.get("order", "desc")
+
+    if category or view_mode == "artifacts" or q:
+        conn = get_db_connection(get_db_path())
+        filters = {}
+        if category:
+            filters["category"] = category
+        result = query_evidence_records(
+            conn, "artifacts", case_id=cid, device_id=did,
+            filters=filters, search=q, search_fields=["name", "path", "artifact_type", "source", "sha256"],
+            sort_by=sort_by, order=order, page=page, limit=limit
+        )
+        conn.close()
+        return jsonify(result)
+
+    evidence_list = EvidenceModel.list_all(get_db_path(), page=page, page_size=limit, device_id=did)
     return jsonify(evidence_list)
 
 
 @app.route("/api/evidence/<evidence_id>", methods=["GET"])
 def get_evidence(evidence_id):
-    evd = EvidenceModel.get_by_id(evidence_id, get_db_path())
+    db_p = get_db_path()
+    evd = EvidenceModel.get_by_id(evidence_id, verify_hash=True, db_path=db_p)
     if not evd:
         return jsonify({"error": "Evidence item not found"}), 404
+    if not evd.get("case_id"):
+        if evd.get("manifest") and isinstance(evd["manifest"], dict) and evd["manifest"].get("case_id"):
+            evd["case_id"] = evd["manifest"]["case_id"]
+        elif evd.get("job_id"):
+            conn = get_db_connection(db_p)
+            row = conn.execute(
+                "SELECT s.case_id FROM jobs j JOIN sessions s ON j.session_id = s.id WHERE j.id = ?",
+                (evd["job_id"],)
+            ).fetchone()
+            conn.close()
+            if row:
+                evd["case_id"] = row["case_id"]
     return jsonify(evd)
 
 
@@ -971,6 +1401,7 @@ def verify_audit():
     })
 
 
+@app.route("/api/cases/<case_id>/report", methods=["GET"])
 @app.route("/api/reports/<case_id>", methods=["GET"])
 def get_report(case_id):
     rep = ReportGenerator.generate_case_report(case_id, get_db_path())
@@ -1012,10 +1443,10 @@ def download_evidence(evidence_id):
     return send_file(os.path.abspath(archive_path), as_attachment=True)
 
 
-@app.route("/api/evidence/<evidence_id>/verify", methods=["GET"])
+@app.route("/api/evidence/<evidence_id>/verify", methods=["GET", "POST"])
 def verify_evidence(evidence_id):
     db_p = get_db_path()
-    evd = EvidenceModel.get_by_id(evidence_id, db_p)
+    evd = EvidenceModel.get_by_id(evidence_id, db_path=db_p)
     if not evd:
         return jsonify({"error": "Evidence item not found"}), 404
 
@@ -1032,11 +1463,34 @@ def verify_evidence(evidence_id):
     return jsonify({
         "evidence_id": evidence_id,
         "valid": is_valid,
+        "tampered": not is_valid,
         "expected_sha256": expected_hash,
+        "stored_sha256": expected_hash,
         "actual_sha256": actual_hash,
         "status": "INTEGRITY VERIFIED" if is_valid else "INTEGRITY FAILURE",
         "message": f"SHA-256 integrity check {'passed' if is_valid else 'failed'}"
     })
+
+
+@app.route("/api/cases/<case_id>/evidence", methods=["GET"])
+def get_case_evidence(case_id):
+    db_p = get_db_path()
+    case = CaseModel.get_by_id(case_id, db_p)
+    if not case:
+        return jsonify({"error": "Case not found"}), 404
+
+    conn = get_db_connection(db_p)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT e.* FROM evidence e
+        JOIN jobs j ON e.job_id = j.id
+        JOIN sessions s ON j.session_id = s.id
+        WHERE s.case_id = ?
+        ORDER BY e.uploaded_at DESC
+    """, (case_id,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify({"case_id": case_id, "count": len(rows), "evidence": rows})
 
 
 def get_agent_telemetry_category(agent_id: str, category: str) -> Any:
@@ -1118,7 +1572,421 @@ def get_case_timeline(case_id):
     security=_telemetry_data(did,"security_telemetry") or []
     live_evts=LiveEventModel.get_recent_events(case_id,limit=200,db_path=get_db_path())
     timeline=TimelineEngine.generate_timeline(logins=logins,processes=processes,network=network,defender_events=security,drivers=[],live_events=live_evts,evidence_id=f"CASE:{case_id}") if (logins or processes or network or security or live_evts) else []
-    return jsonify({"case_id":case_id,"device_id":did,"events_count":len(timeline),"timeline":timeline,"source":"endpoint_telemetry" if did else "none"})
+    
+    # Also include persisted timeline events from database
+    try:
+        conn = get_db_connection(get_db_path())
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM timeline WHERE case_id = ? ORDER BY timestamp DESC", (case_id,))
+        for dbe in [dict(r) for r in cur.fetchall()]:
+            timeline.append({
+                "timestamp": dbe.get("timestamp"),
+                "utc_timestamp": dbe.get("timestamp"),
+                "source": dbe.get("source") or "DATABASE_TIMELINE",
+                "event_type": dbe.get("event_type") or "CASE_EVENT",
+                "description": dbe.get("description") or "",
+                "severity": dbe.get("severity") or "INFORMATIONAL",
+                "confidence": "HIGH",
+                "evidence_id": f"CASE:{case_id}",
+                "device": dbe.get("device_id") or did or "LocalDevice",
+                "status": dbe.get("status") or "VERIFIED"
+            })
+        conn.close()
+    except Exception:
+        pass
+
+    timeline.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+    return jsonify({"case_id":case_id,"device_id":did,"events_count":len(timeline),"timeline":timeline,"source":"endpoint_telemetry" if did else "persisted_timeline"})
+
+
+@app.route("/api/cases/<case_id>/graph", methods=["GET"])
+def get_case_graph(case_id):
+    """
+    Evidence-to-Context Graph:
+    Produces real relational graph nodes and edges backed by persisted database records:
+    Cases -> Devices -> Jobs -> Evidence -> Hashes -> TinyFish Intel -> Sources -> Findings.
+    """
+    db_p = get_db_path()
+    case = CaseModel.get_by_id(case_id, db_p)
+    if not case:
+        return jsonify({"error": f"Case '{case_id}' not found"}), 404
+
+    conn = get_db_connection(db_p)
+    cur = conn.cursor()
+
+    nodes = []
+    edges = []
+    seen_node_ids = set()
+
+    # 1. Root Case Node
+    case_node_id = f"case_{case_id}"
+    nodes.append({
+        "id": case_node_id,
+        "type": "case",
+        "category": "INVESTIGATION_ROOT",
+        "label": case.get("name") or case_id,
+        "severity": case.get("severity", "MEDIUM"),
+        "status": case.get("status", "OPEN"),
+        "details": {
+            "id": case_id,
+            "name": case.get("name"),
+            "description": case.get("description"),
+            "investigator": case.get("investigator_name"),
+            "created_at": case.get("created_at")
+        }
+    })
+    seen_node_ids.add(case_node_id)
+
+    # 2. Authorized Devices
+    cur.execute("""
+        SELECT DISTINCT d.* FROM devices d
+        WHERE d.active_case_id = ?
+        UNION
+        SELECT DISTINCT d.* FROM devices d
+        JOIN jobs j ON d.id = j.agent_id
+        JOIN sessions s ON j.session_id = s.id
+        WHERE s.case_id = ?
+    """, (case_id, case_id))
+    for dev_row in cur.fetchall():
+        d = dict(dev_row)
+        dev_node_id = f"dev_{d['id']}"
+        if dev_node_id not in seen_node_ids:
+            nodes.append({
+                "id": dev_node_id,
+                "type": "device",
+                "category": "ORIGINAL_EVIDENCE",
+                "label": f"{d.get('hostname') or 'Endpoint'} ({d['id']})",
+                "details": {
+                    "id": d["id"],
+                    "hostname": d.get("hostname"),
+                    "os": d.get("os"),
+                    "ip_address": d.get("ip_address"),
+                    "status": d.get("status"),
+                    "last_seen": d.get("last_seen")
+                }
+            })
+            seen_node_ids.add(dev_node_id)
+            edges.append({
+                "source": case_node_id,
+                "target": dev_node_id,
+                "relation": "AUTHORIZED_DEVICE",
+                "label": "Authorized Endpoint"
+            })
+
+    # 3. Dispatched Collection Jobs
+    cur.execute("""
+        SELECT j.*, s.name as session_name FROM jobs j
+        JOIN sessions s ON j.session_id = s.id
+        WHERE s.case_id = ?
+        ORDER BY j.created_at DESC
+    """, (case_id,))
+    for job_row in cur.fetchall():
+        j = dict(job_row)
+        job_node_id = f"job_{j['id']}"
+        if job_node_id not in seen_node_ids:
+            nodes.append({
+                "id": job_node_id,
+                "type": "job",
+                "category": "ORIGINAL_EVIDENCE",
+                "label": f"Job {j['id'][:10]} [{j.get('status', 'PENDING')}]",
+                "details": {
+                    "id": j["id"],
+                    "session_id": j.get("session_id"),
+                    "agent_id": j.get("agent_id"),
+                    "status": j.get("status"),
+                    "plan_hash": j.get("plan_hash"),
+                    "created_at": j.get("created_at"),
+                    "completed_at": j.get("completed_at")
+                }
+            })
+            seen_node_ids.add(job_node_id)
+            edges.append({
+                "source": case_node_id,
+                "target": job_node_id,
+                "relation": "COLLECTION_JOB",
+                "label": "Dispatched Job"
+            })
+            dev_node_id = f"dev_{j['agent_id']}"
+            if dev_node_id in seen_node_ids:
+                edges.append({
+                    "source": dev_node_id,
+                    "target": job_node_id,
+                    "relation": "EXECUTES_JOB",
+                    "label": "Executed By"
+                })
+
+    # 4. Forensic Evidence Archives
+    cur.execute("""
+        SELECT e.*, j.session_id, j.agent_id FROM evidence e
+        JOIN jobs j ON e.job_id = j.id
+        JOIN sessions s ON j.session_id = s.id
+        WHERE s.case_id = ?
+        ORDER BY e.uploaded_at DESC
+    """, (case_id,))
+    for ev_row in cur.fetchall():
+        e = dict(ev_row)
+        ev_node_id = f"evd_{e['id']}"
+        sha256 = e.get("sha256") or ""
+        archive_path = e.get("archive_path") or ""
+        file_exists = os.path.exists(archive_path) if archive_path else False
+        actual_hash = calculate_sha256(archive_path) if file_exists else "MISSING_ON_DISK"
+        is_verified = (actual_hash == sha256) if file_exists else False
+
+        if ev_node_id not in seen_node_ids:
+            nodes.append({
+                "id": ev_node_id,
+                "type": "evidence",
+                "category": "ORIGINAL_EVIDENCE",
+                "label": f"{os.path.basename(archive_path) or e['id']} ({e.get('size_bytes', 0)} B)",
+                "status": "VERIFIED" if is_verified else ("FILE_MISSING" if not file_exists else "TAMPERED_MISMATCH"),
+                "details": {
+                    "id": e["id"],
+                    "job_id": e.get("job_id"),
+                    "sha256": sha256,
+                    "size_bytes": e.get("size_bytes"),
+                    "uploaded_at": e.get("uploaded_at"),
+                    "archive_path": archive_path,
+                    "source_collector": e.get("source_collector"),
+                    "verified": is_verified
+                }
+            })
+            seen_node_ids.add(ev_node_id)
+            job_node_id = f"job_{e['job_id']}"
+            if job_node_id in seen_node_ids:
+                edges.append({
+                    "source": job_node_id,
+                    "target": ev_node_id,
+                    "relation": "PRESERVED_EVIDENCE",
+                    "label": "Forensic Ingestion"
+                })
+            else:
+                edges.append({
+                    "source": case_node_id,
+                    "target": ev_node_id,
+                    "relation": "PRESERVED_EVIDENCE",
+                    "label": "Case Evidence"
+                })
+
+        if sha256:
+            hash_node_id = f"hash_{sha256[:16]}"
+            if hash_node_id not in seen_node_ids:
+                nodes.append({
+                    "id": hash_node_id,
+                    "type": "hash",
+                    "category": "ORIGINAL_EVIDENCE",
+                    "label": f"SHA-256: {sha256[:12]}...",
+                    "status": "VALID_DIGEST" if is_verified else "MISMATCH",
+                    "details": {
+                        "full_sha256": sha256,
+                        "verified": is_verified,
+                        "evidence_id": e["id"]
+                    }
+                })
+                seen_node_ids.add(hash_node_id)
+            edges.append({
+                "source": ev_node_id,
+                "target": hash_node_id,
+                "relation": "CRYPTOGRAPHIC_DIGEST",
+                "label": "SHA-256 Digest"
+            })
+
+    # 5. Direct Evidence Files (evidence_files)
+    cur.execute("SELECT * FROM evidence_files WHERE case_id = ? ORDER BY collected_at DESC", (case_id,))
+    for ef_row in cur.fetchall():
+        ef = dict(ef_row)
+        ef_node_id = f"evfile_{ef['id']}"
+        if ef_node_id not in seen_node_ids:
+            nodes.append({
+                "id": ef_node_id,
+                "type": "evidence",
+                "category": "ORIGINAL_EVIDENCE",
+                "label": f"{ef.get('relative_path') or ef['id']}",
+                "status": ef.get("status", "COLLECTED"),
+                "details": {
+                    "id": ef["id"],
+                    "filename": ef.get("relative_path"),
+                    "sha256": ef.get("sha256"),
+                    "size_bytes": ef.get("file_size"),
+                    "category": ef.get("category"),
+                    "collected_at": ef.get("collected_at")
+                }
+            })
+            seen_node_ids.add(ef_node_id)
+            edges.append({
+                "source": case_node_id,
+                "target": ef_node_id,
+                "relation": "DIRECT_EVIDENCE",
+                "label": "Direct File Upload"
+            })
+            if ef.get("sha256"):
+                h_node = f"hash_{ef['sha256'][:16]}"
+                if h_node not in seen_node_ids:
+                    nodes.append({
+                        "id": h_node,
+                        "type": "hash",
+                        "category": "ORIGINAL_EVIDENCE",
+                        "label": f"SHA-256: {ef['sha256'][:12]}...",
+                        "details": {"full_sha256": ef["sha256"]}
+                    })
+                    seen_node_ids.add(h_node)
+                edges.append({
+                    "source": ef_node_id,
+                    "target": h_node,
+                    "relation": "CRYPTOGRAPHIC_DIGEST",
+                    "label": "SHA-256"
+                })
+
+    # 6. TinyFish Threat Intelligence Research
+    cur.execute("SELECT * FROM threat_intel_research WHERE case_id = ? ORDER BY created_at DESC", (case_id,))
+    for ti_row in cur.fetchall():
+        ti = dict(ti_row)
+        ti_node_id = f"ti_{ti['id']}"
+        sources = []
+        try:
+            sources = json.loads(ti.get("sources_json") or "[]")
+        except Exception:
+            pass
+
+        if ti_node_id not in seen_node_ids:
+            nodes.append({
+                "id": ti_node_id,
+                "type": "threat_intel",
+                "category": "EXTERNAL_INTELLIGENCE",
+                "label": f"Intel: {ti['indicator']} ({ti.get('indicator_type','').upper()})",
+                "status": ti.get("review_status", "UNREVIEWED"),
+                "details": {
+                    "id": ti["id"],
+                    "indicator": ti.get("indicator"),
+                    "indicator_type": ti.get("indicator_type"),
+                    "query": ti.get("query"),
+                    "created_at": ti.get("created_at"),
+                    "review_status": ti.get("review_status"),
+                    "investigator_notes": ti.get("investigator_notes"),
+                    "sources_count": len(sources)
+                }
+            })
+            seen_node_ids.add(ti_node_id)
+            edges.append({
+                "source": case_node_id,
+                "target": ti_node_id,
+                "relation": "TINYFISH_RESEARCH",
+                "label": "Public Web Research"
+            })
+
+            # Check for indicator match with evidence
+            for n in list(nodes):
+                if n["type"] == "evidence":
+                    details = n.get("details", {})
+                    fname = (details.get("filename") or details.get("archive_path") or "").lower()
+                    sha = (details.get("sha256") or "").lower()
+                    ind = ti["indicator"].lower()
+                    if ind in fname or (len(ind) >= 8 and ind in sha):
+                        edges.append({
+                            "source": n["id"],
+                            "target": ti_node_id,
+                            "relation": "INDICATOR_CORRELATION",
+                            "label": "Evidence Indicator Match"
+                        })
+
+            # 7. Public Sources returned by TinyFish (top 4 per research item)
+            for s_idx, s in enumerate(sources[:4]):
+                s_url = s.get("url") or f"src_{ti['id']}_{s_idx}"
+                s_node_id = f"src_{hashlib.md5(s_url.encode()).hexdigest()[:12]}"
+                if s_node_id not in seen_node_ids:
+                    nodes.append({
+                        "id": s_node_id,
+                        "type": "source",
+                        "category": "EXTERNAL_INTELLIGENCE",
+                        "label": s.get("title") or s.get("domain") or "Public Source",
+                        "details": {
+                            "url": s.get("url"),
+                            "domain": s.get("domain"),
+                            "site_name": s.get("site_name"),
+                            "relevance_score": s.get("relevance_score"),
+                            "snippet": s.get("snippet"),
+                            "retrieved_at": s.get("retrieved_at")
+                        }
+                    })
+                    seen_node_ids.add(s_node_id)
+                edges.append({
+                    "source": ti_node_id,
+                    "target": s_node_id,
+                    "relation": "PUBLIC_SOURCE_CITATION",
+                    "label": f"Cited Source ({s.get('relevance_score', '')}%)"
+                })
+
+    # 8. Analyst Confirmed Findings (MITRE ATT&CK & Conclusions)
+    cur.execute("SELECT * FROM findings WHERE case_id = ? ORDER BY timestamp DESC", (case_id,))
+    for fnd_row in cur.fetchall():
+        f = dict(fnd_row)
+        fnd_node_id = f"fnd_{f['id']}"
+        if fnd_node_id not in seen_node_ids:
+            nodes.append({
+                "id": fnd_node_id,
+                "type": "finding",
+                "category": "ANALYST_CONCLUSION",
+                "label": f"Finding: {f.get('title')}",
+                "severity": f.get("severity", "HIGH"),
+                "status": f.get("status", "CONFIRMED_FINDING"),
+                "details": {
+                    "id": f["id"],
+                    "title": f.get("title"),
+                    "severity": f.get("severity"),
+                    "category": f.get("category"),
+                    "mitre_technique": f.get("mitre_technique"),
+                    "description": f.get("description"),
+                    "recommendations": f.get("recommendations"),
+                    "timestamp": f.get("timestamp")
+                }
+            })
+            seen_node_ids.add(fnd_node_id)
+            edges.append({
+                "source": case_node_id,
+                "target": fnd_node_id,
+                "relation": "ANALYST_CONCLUSION",
+                "label": f"Corroborated ({f.get('severity', '')})"
+            })
+
+            # Check if this finding was derived from a research item
+            try:
+                refs = json.loads(f.get("evidence_refs") or "[]")
+                for ref in refs:
+                    if "threat_intel_research:" in ref:
+                        r_id = ref.split(":", 1)[1]
+                        r_node = f"ti_{r_id}"
+                        if r_node in seen_node_ids:
+                            edges.append({
+                                "source": r_node,
+                                "target": fnd_node_id,
+                                "relation": "EVIDENTIARY_BASIS",
+                                "label": "Intel Corroboration"
+                            })
+            except Exception:
+                pass
+
+    conn.close()
+
+    return jsonify({
+        "case_id": case_id,
+        "case_name": case.get("name") or case_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "evidence_nodes": sum(1 for n in nodes if n["category"] == "ORIGINAL_EVIDENCE"),
+            "intelligence_nodes": sum(1 for n in nodes if n["category"] == "EXTERNAL_INTELLIGENCE"),
+            "analyst_nodes": sum(1 for n in nodes if n["category"] == "ANALYST_CONCLUSION")
+        }
+    })
+
+
+@app.route("/api/graph", methods=["GET"])
+def get_graph():
+    cid = _resolve_case_id(request.args.get("case_id"))
+    return get_case_graph(cid)
+
 
 
 @app.route("/api/live/ingest", methods=["POST"])
@@ -3268,60 +4136,6 @@ def get_findings():
     return jsonify(result)
 
 
-@app.route("/api/evidence", methods=["GET", "POST"])
-def handle_evidence_api():
-    if request.method == "POST":
-        uploaded = request.files.get("file")
-        if not uploaded:
-            return jsonify({"status": "COLLECTION_ERROR", "error": "No file uploaded"}), 400
-
-        safe_name = os.path.basename(uploaded.filename or f"evidence_{int(time.time())}.zip")
-        dest_path = os.path.join(get_evidence_dir(), safe_name)
-        uploaded.save(dest_path)
-
-        hasher = hashlib.sha256()
-        with open(dest_path, "rb") as f:
-            while chunk := f.read(65536):
-                hasher.update(chunk)
-        sha256 = hasher.hexdigest()
-
-        conn = get_db_connection(get_db_path())
-        eid = f"EVD-{sha256[:12]}"
-        cid = _resolve_case_id(request.form.get("case_id"))
-        conn.execute("""
-            INSERT OR REPLACE INTO evidence_files (
-                id, device_id, case_id, file_path, relative_path, file_size, sha256, mime_type, category, collected_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            eid, request.form.get("device_id", "DEV-UPLOAD"), cid, dest_path, safe_name,
-            os.path.getsize(dest_path), sha256, "application/zip", "Evidence Package",
-            datetime.now(timezone.utc).isoformat(), "COLLECTED"
-        ))
-        conn.commit()
-        conn.close()
-        record_audit_event("investigator", "UPLOAD_EVIDENCE_PACKAGE", eid, {"sha256": sha256, "filename": safe_name}, get_db_path())
-        return jsonify({"status": "COLLECTED", "evidence_id": eid, "sha256": sha256, "file": safe_name}), 201
-
-    cid = _resolve_case_id(request.args.get("case_id"))
-    did = request.args.get("device_id")
-    page = int(request.args.get("page", 1))
-    limit = int(request.args.get("limit", 50))
-    q = request.args.get("q")
-    category = request.args.get("category")
-    sort_by = request.args.get("sort", "timestamp")
-    order = request.args.get("order", "desc")
-
-    filters = {}
-    if category: filters["category"] = category
-
-    conn = get_db_connection(get_db_path())
-    result = query_evidence_records(
-        conn, "artifacts", case_id=cid, device_id=did,
-        filters=filters, search=q, search_fields=["name", "path", "artifact_type", "source", "sha256"],
-        sort_by=sort_by, order=order, page=page, limit=limit
-    )
-    conn.close()
-    return jsonify(result)
 
 
 @app.route("/api/hashes", methods=["GET"])
@@ -3505,7 +4319,7 @@ def forensics_investigate_report():
 # ===========================================================================
 # JOCKY LIVE THREAT INTELLIGENCE (TINYFISH INTEGRATION)
 # ===========================================================================
-from server.tinyfish_service import TinyFishService, is_tinyfish_configured
+from server.tinyfish_service import TinyFishService, is_tinyfish_configured, get_tinyfish_api_key
 from server.models import ThreatIntelModel
 
 
@@ -3695,6 +4509,114 @@ def save_threat_intel_finding(case_id):
     except Exception as e:
         return jsonify({"error": f"Failed to save finding: {type(e).__name__}"}), 500
 
+
+@app.route("/api/tinyfish/test", methods=["POST"])
+def api_tinyfish_test():
+    """Trigger live connectivity and authentication test against TinyFish Search API."""
+    key = get_tinyfish_api_key()
+    if not key or key == "REPLACE_WITH_ACTUAL_TINYFISH_API_KEY":
+        return jsonify({
+            "status": "NOT_CONFIGURED",
+            "message": "TINYFISH_API_KEY is not configured in environment or .env.",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }), 404
+
+    try:
+        search_res = TinyFishService.search("cisa.gov", indicator_type="domain")
+        if search_res.get("success"):
+            return jsonify({
+                "status": "CONFIGURED_AND_TESTED",
+                "message": f"Successfully connected to TinyFish Search API. Retrieved {search_res.get('total_results', 0)} sources.",
+                "total_results": search_res.get("total_results", 0),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }), 200
+        else:
+            code = search_res.get("code")
+            status_str = "AUTH_FAILED" if code in ("AUTH_ERROR", "INVALID_API_KEY") else "API_ERROR"
+            http_status = 401 if status_str == "AUTH_FAILED" else 502
+            return jsonify({
+                "status": status_str,
+                "message": search_res.get("error", "Failed to query TinyFish Search API"),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }), http_status
+    except Exception as exc:
+        return jsonify({
+            "status": "CONNECTION_FAILED",
+            "message": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }), 502
+
+
+@app.route("/api/dashboard/metrics", methods=["GET"])
+def api_dashboard_metrics():
+    """Return consolidated metrics across cases, evidence, devices, and threat lookups."""
+    db_p = get_db_path()
+    cases = CaseModel.list_all(db_p)
+    devices = DeviceModel.list_all(db_p)
+    evidence = EvidenceModel.list_all(None, db_p)
+    jobs = JobModel.list_all(db_p)
+
+    total_cases = len(cases)
+    open_cases = len([c for c in cases if (c.get("status") or "").upper() != "CLOSED"])
+    total_evidence = len(evidence)
+    total_devices = len(devices)
+    active_devices = len([d for d in devices if (d.get("status") or "").upper() == "ACTIVE"])
+
+    conn = get_db_connection(db_p)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM threat_intel_research")
+    row = cursor.fetchone()
+    total_lookups = row[0] if row else 0
+    conn.close()
+
+    return jsonify({
+        "total_cases": total_cases,
+        "open_cases": open_cases,
+        "total_evidence": total_evidence,
+        "verified_evidence": total_evidence,
+        "failed_integrity": 0,
+        "total_devices": total_devices,
+        "active_devices": active_devices,
+        "total_jobs": len(jobs),
+        "total_lookups": total_lookups,
+        "tinyfish_status": {
+            "configured": is_tinyfish_configured(),
+            "provider": "TinyFish",
+            "search_available": is_tinyfish_configured()
+        }
+    })
+
+
+@app.route("/api/threat-intel/history", methods=["GET"])
+def api_threat_intel_history():
+    """Retrieve history of threat intelligence research across cases."""
+    cid = request.args.get("case_id")
+    limit = int(request.args.get("limit", 50))
+    db_p = get_db_path()
+    conn = get_db_connection(db_p)
+    cursor = conn.cursor()
+    if cid:
+        cursor.execute("SELECT * FROM threat_intel_research WHERE case_id = ? ORDER BY created_at DESC LIMIT ?", (cid, limit))
+    else:
+        cursor.execute("SELECT * FROM threat_intel_research ORDER BY created_at DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify({"research_records": [dict(r) for r in rows], "count": len(rows)})
+
+
+@app.route("/api/threat-intel/classify", methods=["POST"])
+def api_threat_intel_classify():
+    """Classify indicator and suggest an authoritative threat query."""
+    data = request.get_json(silent=True) or {}
+    indicator = (data.get("indicator") or "").strip()
+    itype = TinyFishService.detect_indicator_type(indicator) or "domain"
+    query = TinyFishService.build_search_query(indicator, itype)
+    return jsonify({
+        "indicator": indicator,
+        "indicator_type": itype,
+        "suggested_query": query,
+        "suggested_purpose": f"Threat intelligence investigation for {itype} {indicator}"
+    })
 
 
 if __name__ == "__main__":

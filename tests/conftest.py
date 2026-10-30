@@ -170,3 +170,31 @@ def isolate_env(tmp_path):
     else:
         os.environ.pop("JOCKY_EVIDENCE_DIR", None)
 
+
+@pytest.fixture
+def app(tmp_path):
+    """Provide isolated application instance for testing."""
+    from app import create_app
+    from app.config import Config
+    test_db = tmp_path / "test_app.db"
+    test_evd = tmp_path / "evidence"
+    test_rep = tmp_path / "reports"
+    test_evd.mkdir(parents=True, exist_ok=True)
+    test_rep.mkdir(parents=True, exist_ok=True)
+    Config.DB_PATH = test_db
+    Config.EVIDENCE_DIR = test_evd
+    Config.REPORTS_DIR = test_rep
+    test_app = create_app({
+        "TESTING": True,
+        "DATABASE_PATH": str(test_db),
+        "EVIDENCE_STORAGE_PATH": str(test_evd),
+        "REPORTS_STORAGE_PATH": str(test_rep),
+    })
+    return test_app
+
+
+@pytest.fixture
+def client(app):
+    """Provide Flask test client."""
+    return app.test_client()
+

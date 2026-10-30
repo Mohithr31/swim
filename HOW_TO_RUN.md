@@ -1,56 +1,134 @@
-# HOW TO RUN — JOCKY Combined Framework
+# HOW TO RUN — Tiny Monitor / JOCKY DFIR Platform
 
-## Prerequisites
-
-- Python 3.11+ (3.13 tested)
-- `pip` / `venv`
-- Optional for LLVM build: `clang`, `opt`, `llc` (LLVM toolchain)
-- Optional for PDF reports: `weasyprint` or `wkhtmltopdf`
+**Event:** Swim with TinyFish — Presidency University, Bengaluru  
+**Environment:** Windows 11, PowerShell, Linux, Python 3.10+
 
 ---
 
-## 1. Install Dependencies
+## 1. Prerequisites & Environment Setup
 
+Copy `.env.example` to `.env` and set your configuration:
+```powershell
+Copy-Item .env.example .env
+```
+Ensure your `.env` contains:
+```env
+JOCKY_PORT=5000
+JOCKY_DB=jocky_forensics.db
+JOCKY_EVIDENCE_DIR=evidence
+JOCKY_API_KEY=JOCKY-DFIR-2026
+TINYFISH_API_KEY=your_actual_tinyfish_api_key_here
+```
+
+Install Python dependencies:
 ```bash
-python3 -m venv venv
-source venv/bin/activate          # Linux/macOS
-# OR
-.\venv\Scripts\activate           # Windows PowerShell
-
 pip install -r requirements.txt
 ```
 
 ---
 
-## 2. Start the Central Server
+## 2. Start the Canonical Central Server
 
+The platform has **one canonical server entry point**:
+
+### Windows Command Prompt
+```cmd
+run_server.bat
+```
+
+### Windows PowerShell
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_server.ps1
+# OR directly:
+python run.py
+```
+
+### Linux / macOS
 ```bash
-python3 -m server.server
+./run_server.sh
+# OR:
+python3 run.py
 ```
 
-Default: `http://127.0.0.1:5000`
+The server binds to `http://127.0.0.1:5000/`.
+- **Tiny Monitor Dashboard:** `http://127.0.0.1:5000/`
+- **Subsystem Health Status:** `http://127.0.0.1:5000/api/health`
+- **Platform Information:** `http://127.0.0.1:5000/api/status`
+- **Evidence-to-Context Graph:** `http://127.0.0.1:5000/api/graph`
 
-Set environment variables in `.env` (copy from `.env.example`):
+---
+
+## 3. Run the Authorized Endpoint Agent
+
+### Windows Command Prompt
+```cmd
+run_agent.bat
 ```
-JOCKY_API_KEY=your-secret-key
-JOCKY_DB=jocky_forensics.db
-JOCKY_EVIDENCE_DIR=evidence
-PORT=5000
+
+### Windows PowerShell
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_agent.ps1
+# OR:
+python -m agent.jocky_agent --server http://127.0.0.1:5000 --api-key JOCKY-DFIR-2026
+```
+
+### Collect Point-in-Time Triage Snapshot
+```bash
+python -m agent.jocky_agent --server http://127.0.0.1:5000 --snapshot
 ```
 
 ---
 
-## 3. Launch the Forensic Agent
+## 4. Full End-to-End Acceptance Verification
 
-### Linux
+Execute the complete 11-step automated acceptance scenario:
 ```bash
-python3 -m agent.jocky_agent --server http://127.0.0.1:5000
+python tools/test_e2e_acceptance.py
 ```
+This tests:
+1. Server health & TinyFish threat intel configuration
+2. Case creation
+3. Device enrollment & case assignment
+4. Allowlisted forensic job dispatch
+5. Real agent polling & allowlisted execution
+6. Evidence ingest & provenance hashing
+7. Baseline SHA-256 integrity verification
+8. Real-time cryptographic tamper detection (1 byte disk modification caught)
+9. Evidence restoration & re-verification
+10. Relational Evidence-to-Context Graph derivation
+11. Forensic report & timeline consistency
 
-### Windows (PowerShell)
-```powershell
-.\agent\run_agent.ps1
+---
+
+## 5. Model Context Protocol (MCP) Server
+
+Connect your AI investigator assistant (Claude Desktop, VS Code, Cursor) using stdio JSON-RPC 2.0:
+```bash
+python server/mcp_server.py
 ```
+Or reference `mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "jocky-dfir": {
+      "command": "python",
+      "args": ["server/mcp_server.py"],
+      "env": {
+        "JOCKY_DB": "jocky_forensics.db",
+        "JOCKY_EVIDENCE_DIR": "evidence"
+      }
+    }
+  }
+}
+```
+Supported MCP Tools:
+- `jocky_list_cases`: List active and archived investigations
+- `jocky_get_case_summary`: Retrieve structured statistics, open jobs, and evidence
+- `jocky_research_indicator`: Query TinyFish Search & Fetch API for threat intel
+- `jocky_list_evidence`: Query evidence vault with disk-byte SHA-256 verification & tamper detection
+- `jocky_get_research_history`: Retrieve prior threat intelligence queries and sources
+- `jocky_generate_investigation_summary`: Generate analyst summary of findings and evidence
+
 
 ### Generate a Launcher Script
 ```bash
@@ -223,7 +301,7 @@ be downloaded directly; a missing binary can be generated from the dashboard whe
 server is running on the matching native OS. A native Windows PE still requires a
 Windows build host and a native Linux ELF requires a Linux build host.
 
-## Default DFIR Gateway Login
+## Default Tiny Monitor Login
 
 - Username: `INV-9042-FED`
 - Password: `JOCKY-DFIR-2026`

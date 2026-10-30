@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B6 Device Forensics Engine
+Tiny Monitor — B6 Device Forensics Engine
 Collects authentic physical and logical device evidence across Windows, Linux, and macOS:
 USB devices, Bluetooth, network adapters, ARP table, printers, Wi-Fi profiles, and removable media.
 Every record contains authentic source, collection status, and hardware identifiers.

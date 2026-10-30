@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B5 Web & Social Activity Mapping Engine
+Tiny Monitor — B5 Web & Social Activity Mapping Engine
 Maps web and social platforms from legitimate browser history artifacts.
 Assigns forensic evidence types:
   VISITED_DOMAIN

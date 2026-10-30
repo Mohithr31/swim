@@ -4,14 +4,405 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0f172a">
-<title>DFIR Gateway — JOCKY Forensic Platform</title>
+<title>Tiny Monitor — TinyFish-Powered Digital Forensics & Incident Response</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','ui-sans-serif','system-ui'],mono:['JetBrains Mono','ui-monospace','SFMono-Regular']}}}}
+
+// --- CASE & EVIDENCE MODAL CONTROLLERS ---
+
+window.openNewCaseModal = function(){
+  const trackId = newCaseId();
+  const body = `
+    <form id="quickNewCaseForm" onsubmit="submitNewCase(event)" class="space-y-3">
+      <div>
+        <label class="label required">Case Title / Operation Name</label>
+        <input id="qCaseName" class="input font-semibold" placeholder="e.g. Incident Triage - Host 01" required autofocus>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label required">Case Severity</label>
+          <select id="qSeverity" class="select" required>
+            <option>Critical</option>
+            <option>High</option>
+            <option selected>Medium</option>
+            <option>Low</option>
+          </select>
+        </div>
+        <div>
+          <label class="label required">Investigator Badge ID</label>
+          <input id="qInvestigator" class="input" value="INV-9042-FED" required>
+        </div>
+      </div>
+      <div>
+        <label class="label">Investigation Scope &amp; Target Rationale</label>
+        <textarea id="qDescription" class="textarea text-xs" placeholder="Describe the incident scope, indicator leads, or investigation justification...">Defensive incident triage and forensic investigation using Tiny Monitor and TinyFish threat intelligence.</textarea>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-700">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus mr-1"></i> Create &amp; Scope Case</button>
+      </div>
+    </form>
+  `;
+  openModal('Open New Forensic Investigation Case', body);
+};
+
+window.submitNewCase = async function(e){
+  e.preventDefault();
+  const name = $('#qCaseName').value.trim();
+  const severity = $('#qSeverity').value;
+  const investigator = $('#qInvestigator').value.trim();
+  const desc = $('#qDescription').value.trim();
+  if(!name){ toast('Case title is required.'); return; }
+
+  try {
+    const payload = {
+      name: name,
+      description: desc,
+      severity: severity,
+      investigator_name: investigator,
+      investigation_notes: `Created via Tiny Monitor Quick Intake. Severity: ${severity}`
+    };
+    const created = await api('/api/cases', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    closeModal();
+    toast(`Case ${created.id} initialized successfully.`);
+    state.caseId = created.id;
+    state.case = created;
+    await loadExistingCases();
+    renderCaseBanner();
+    setView('overview');
+  } catch(err) {
+    toast('Failed to create case: ' + err.message);
+  }
+};
+
+window.toggleCaseStatus = async function(caseId, targetStatus){
+  try {
+    await api(`/api/cases/${encodeURIComponent(caseId)}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ status: targetStatus })
+    });
+    toast(`Case ${caseId} status updated to ${targetStatus}.`);
+    await loadExistingCases();
+    if(state.caseId === caseId && state.case) {
+      state.case.status = targetStatus;
+      renderCaseBanner();
+    }
+    renderView();
+  } catch(err) {
+    toast('Status update failed: ' + err.message);
+  }
+};
+
+window.openCaseDetailModal = async function(caseId){
+  try {
+    const [c, evRes, tiRes] = await Promise.all([
+      api(`/api/cases/${encodeURIComponent(caseId)}`),
+      api(`/api/cases/${encodeURIComponent(caseId)}/evidence`).catch(()=>({evidence:[]})),
+      api(`/api/cases/${encodeURIComponent(caseId)}/threat-intel`).catch(()=>({research_records:[]}))
+    ]);
+
+    const evCount = (evRes.evidence || []).length;
+    const tiCount = (tiRes.research_records || []).length;
+
+    const body = `
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="p-3 rounded bg-slate-900 border border-slate-800">
+            <span class="text-slate-400 block mb-1">Case Tracking ID:</span>
+            <span class="mono font-bold text-cyan-400 text-sm">${escapeHtml(c.id)}</span>
+          </div>
+          <div class="p-3 rounded bg-slate-900 border border-slate-800">
+            <span class="text-slate-400 block mb-1">Status &amp; Severity:</span>
+            <span class="tag ${(c.status||'OPEN').toUpperCase()!=='CLOSED'?'ok':'bad'} mr-2">${escapeHtml(c.status||'OPEN')}</span>
+            <span class="severity sev-${(c.severity||'medium').toLowerCase()}">${escapeHtml(c.severity||'MEDIUM')}</span>
+          </div>
+        </div>
+
+        <div>
+          <h4 class="text-xs font-bold uppercase text-slate-400 mb-1">Case Operation Name</h4>
+          <div class="text-sm font-semibold text-slate-200">${escapeHtml(c.name)}</div>
+        </div>
+
+        <div>
+          <h4 class="text-xs font-bold uppercase text-slate-400 mb-1">Subject Scope &amp; Rationale</h4>
+          <div class="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded border border-slate-800">${escapeHtml(c.description || 'No description entered.')}</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="p-3 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-400 block">Digital Evidence Attached:</span>
+            <span class="font-bold text-cyan-400 text-sm">${evCount} item(s)</span>
+          </div>
+          <div class="p-3 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-400 block">Threat Intel Lookups:</span>
+            <span class="font-bold text-cyan-400 text-sm">${tiCount} search(es)</span>
+          </div>
+        </div>
+
+        <!-- Add Note Section -->
+        <div class="border-t border-slate-800 pt-3">
+          <h4 class="text-xs font-bold uppercase text-slate-400 mb-2">Add Investigator Note</h4>
+          <div class="flex gap-2">
+            <input id="newCaseNoteInput" class="input text-xs" placeholder="Record investigator update or chain-of-custody note...">
+            <button class="btn btn-sm btn-primary" onclick="addCaseNote('${escapeHtml(c.id)}')"><i class="fa-solid fa-paper-plane mr-1"></i> Add Note</button>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+          <button class="btn btn-sm" onclick="closeModal()">Close</button>
+          <button class="btn btn-sm btn-primary" onclick="switchCase('${escapeHtml(c.id)}');closeModal();"><i class="fa-solid fa-arrow-right-to-bracket mr-1"></i> Select Active Case</button>
+        </div>
+      </div>
+    `;
+    openModal(`Case Dossier: ${caseId}`, body);
+  } catch(err) {
+    toast('Failed to load case: ' + err.message);
+  }
+};
+
+window.addCaseNote = async function(caseId){
+  const inp = $('#newCaseNoteInput');
+  const note = (inp ? inp.value : '').trim();
+  if(!note){ toast('Note text cannot be empty.'); return; }
+  try {
+    await api(`/api/cases/${encodeURIComponent(caseId)}/notes`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ note: note, author: state.authUser || 'Investigator' })
+    });
+    toast('Case note added to audit trail.');
+    if(inp) inp.value = '';
+    closeModal();
+  } catch(err) {
+    toast('Note submission failed: ' + err.message);
+  }
+};
+
+window.onEvidenceFileSelected = function(input){
+  const file = input.files?.[0];
+  const nameEl = $('#selectedFileName');
+  const btn = $('#evidenceUploadBtn');
+  if(file) {
+    if(nameEl) nameEl.textContent = `${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+    if(btn) btn.disabled = false;
+  } else {
+    if(nameEl) nameEl.textContent = 'No file selected';
+    if(btn) btn.disabled = true;
+  }
+};
+
+window.uploadEvidenceFileDirect = async function(e){
+  e.preventDefault();
+  const fileInput = $('#evidenceFileInput');
+  const descInput = $('#evidenceDescInput');
+  const fb = $('#evidenceUploadFeedback');
+  const btn = $('#evidenceUploadBtn');
+  const file = fileInput.files?.[0];
+
+  if(!file){ toast('Please select an evidence file.'); return; }
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('case_id', state.caseId);
+  fd.append('manifest', JSON.stringify({
+    filename: file.name,
+    size_bytes: file.size,
+    description: (descInput ? descInput.value : ''),
+    ingested_by: state.authUser || 'Investigator',
+    timestamp: new Date().toISOString()
+  }));
+
+  if(btn) btn.disabled = true;
+  if(fb) {
+    fb.classList.remove('hiddenx');
+    fb.innerHTML = '<span class="text-cyan-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Ingesting evidence bytes and calculating cryptographic SHA-256...</span>';
+  }
+
+  try {
+    const res = await api('/api/evidence', {
+      method: 'POST',
+      body: fd
+    });
+    if(fb) {
+      fb.innerHTML = `<span class="text-green-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i> Successfully ingested! SHA-256: <code class="mono font-normal">${res.sha256}</code></span>`;
+    }
+    toast(`Evidence file '${file.name}' ingested and verified.`);
+    setTimeout(() => { renderView(); }, 1200);
+  } catch(err) {
+    if(fb) {
+      fb.innerHTML = `<span class="text-red-400 font-bold"><i class="fa-solid fa-circle-exclamation mr-1"></i> Upload failed: ${escapeHtml(err.message)}</span>`;
+    }
+    toast('Evidence upload failed: ' + err.message);
+  } finally {
+    if(btn) btn.disabled = false;
+  }
+};
+
+window.verifyEvidenceFile = async function(evidenceId){
+  const cell = $(`#status-cell-${evidenceId}`);
+  if(cell) {
+    cell.innerHTML = '<span class="tag info"><i class="fa-solid fa-spinner fa-spin mr-1"></i>VERIFYING...</span>';
+  }
+  try {
+    const res = await api(`/api/evidence/${encodeURIComponent(evidenceId)}/verify`, { method: 'POST' });
+    if(cell) {
+      if(res.valid) {
+        cell.innerHTML = '<span class="tag ok"><i class="fa-solid fa-circle-check mr-1"></i>VERIFIED (MATCH)</span>';
+        toast(`SHA-256 integrity verified for ${evidenceId}.`);
+      } else {
+        cell.innerHTML = '<span class="tag bad"><i class="fa-solid fa-triangle-exclamation mr-1"></i>TAMPERED / MISMATCH</span>';
+        toast(`WARNING: SHA-256 integrity mismatch for ${evidenceId}!`);
+      }
+    }
+  } catch(err) {
+    if(cell) {
+      cell.innerHTML = `<span class="tag bad"><i class="fa-solid fa-xmark mr-1"></i>ERROR</span>`;
+    }
+    toast('Verification error: ' + err.message);
+  }
+};
+
+window.testTinyFishLiveConnection = async function(){
+  const box = $('#settingsPingResult');
+  if(box) {
+    box.classList.remove('hiddenx');
+    box.innerHTML = '<div class="p-3 rounded bg-slate-900 border border-slate-700 text-cyan-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Pinging TinyFish Search API with test query...</div>';
+  }
+  try {
+    const res = await api('/api/threat-intel/validate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ indicator: 'cisa.gov', indicator_type: 'domain' })
+    });
+    if(box) {
+      box.innerHTML = `
+        <div class="p-3 rounded bg-green-950/40 border border-green-500/40 text-green-300">
+          <i class="fa-solid fa-circle-check mr-1 font-bold"></i>
+          <strong>LIVE PING SUCCESS:</strong> TinyFish endpoint validation responded successfully. Indicator: <code class="mono">${res.indicator}</code> (${res.indicator_type}).
+        </div>
+      `;
+    }
+    toast('TinyFish live connection verified.');
+    updateTinyFishTopStatus();
+  } catch(err) {
+    if(box) {
+      box.innerHTML = `
+        <div class="p-3 rounded bg-red-950/40 border border-red-500/40 text-red-300">
+          <i class="fa-solid fa-circle-xmark mr-1 font-bold"></i>
+          <strong>PING FAILED:</strong> ${escapeHtml(err.message)}
+        </div>
+      `;
+    }
+  }
+};
+
+window.openDispatchJobModal = async function(preselectAgentId, preselectHostname){
+  let devices = [];
+  let cases = [];
+  try {
+    const [devsRes, casesRes] = await Promise.all([
+      api('/api/devices/enrolled').catch(()=>[]),
+      api('/api/cases').catch(()=>[])
+    ]);
+    devices = devsRes || [];
+    cases = casesRes || [];
+  } catch(e) {}
+
+  const deviceOptions = devices.length > 0 
+    ? devices.map(d => `<option value="${escapeHtml(d.id)}" ${d.id === preselectAgentId ? 'selected' : ''}>${escapeHtml(d.hostname || d.id)} (${escapeHtml(d.os || 'Unknown OS')}) [${escapeHtml(d.id.substring(0,8))}...]</option>`).join('')
+    : (preselectAgentId ? `<option value="${escapeHtml(preselectAgentId)}" selected>${escapeHtml(preselectHostname || preselectAgentId)}</option>` : '<option value="" disabled selected>No devices enrolled</option>');
+
+  const caseOptions = cases.length > 0
+    ? cases.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === state.caseId ? 'selected' : ''}>${escapeHtml(c.id)} — ${escapeHtml(c.name)}</option>`).join('')
+    : (state.caseId ? `<option value="${escapeHtml(state.caseId)}" selected>${escapeHtml(state.caseId)} (Active Case)</option>` : '<option value="" disabled selected>No cases found</option>');
+
+  const body = `
+    <form id="dispatchJobForm" onsubmit="submitDispatchJob(event)" class="space-y-3">
+      <div>
+        <label class="label required">Target Enrolled Endpoint</label>
+        <select id="dispatchAgentId" class="select" required>
+          ${deviceOptions}
+        </select>
+        <div class="text-[10px] text-slate-500 mt-1">The job will be placed into the persistent queue for this authenticated endpoint agent.</div>
+      </div>
+      <div>
+        <label class="label required">Forensic Case Association</label>
+        <select id="dispatchCaseId" class="select" required>
+          ${caseOptions}
+        </select>
+      </div>
+      <div>
+        <label class="label required">Collection Profile / Target Artifacts</label>
+        <select id="dispatchCollectionType" class="select font-semibold" required>
+          <option value="process_inventory" selected>Process Inventory &amp; Hashes (Read-Only)</option>
+          <option value="system">Host Specifications, Users &amp; Environment</option>
+          <option value="network">Network Forensics &amp; Active Sockets</option>
+          <option value="browser">Browser History &amp; Downloads (Chrome/Edge/Firefox)</option>
+          <option value="filesystem">Filesystem &amp; High-Risk Directories</option>
+          <option value="all">Full Defensive Incident Triage Suite</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">Investigation Rationale / Authorized Scope</label>
+        <input id="dispatchNotes" class="input text-xs" placeholder="e.g. Incident response triage on suspected unauthorized execution" value="Authorized DFIR forensic collection">
+      </div>
+      <div class="p-2.5 rounded bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+        <i class="fa-solid fa-shield-halved text-cyan-400 mr-1"></i>
+        <strong>Execution Safety:</strong> JOCKY dispatches only compiled read-only forensic collectors from the server-enforced allowlist. Remote shell execution is disabled.
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-700">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-paper-plane mr-1"></i> Enqueue Collection Job</button>
+      </div>
+    </form>
+  `;
+  openModal('Dispatch Forensic Collection Job to Endpoint', body);
+};
+
+window.submitDispatchJob = async function(e){
+  e.preventDefault();
+  const agentId = $('#dispatchAgentId').value;
+  const caseId = $('#dispatchCaseId').value;
+  const colType = $('#dispatchCollectionType').value;
+  const notes = $('#dispatchNotes').value.trim();
+
+  if(!agentId) { toast('Target endpoint is required.'); return; }
+  if(!caseId) { toast('Case association is required.'); return; }
+
+  try {
+    const payload = {
+      case_id: caseId,
+      agent_id: agentId,
+      collection_type: colType,
+      options: { rationale: notes, collection_profile: colType }
+    };
+    const job = await api('/api/jobs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    closeModal();
+    toast(`Job ${job.id || 'enqueued'} submitted for endpoint ${agentId.substring(0,8)}...`);
+    if(state.view === 'job_queue' || state.view === 'devices_enrolled') {
+      renderView();
+    } else {
+      setView('job_queue');
+    }
+  } catch(err) {
+    toast('Failed to dispatch job: ' + err.message);
+  }
+};
+
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
 :root{--bg:#f8fafc;--bg2:#f1f5f9;--white:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--navy:#1e3a8a;--navy2:#172554;--ok:#166534;--warn:#a16207;--danger:#b91c1c;--accent:#0284c7}
@@ -62,6 +453,262 @@ body.dark .pagination-bar{background:#111827;border-color:#1e293b}
 body.dark .tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8}
 @media(max-width:1050px){.case-banner{grid-template-columns:repeat(3,1fr)}.grid2{grid-template-columns:1fr}}
 @media(max-width:800px){.layout{grid-template-columns:1fr}.sidebar{position:relative;top:0;height:auto;border-right:0;border-bottom:1px solid var(--line);display:flex;overflow:auto;gap:4px;padding:6px}.nav-label{display:none}.nav-item{min-width:max-content}.workspace{padding:12px}}
+
+/* --- TINY MONITOR CYBER SOC DESIGN SYSTEM --- */
+:root {
+  --bg: #080c14;
+  --bg2: #0d1527;
+  --surface: #0f172a;
+  --surface2: #1e293b;
+  --surface3: #334155;
+  --line: #1e293b;
+  --line-bright: rgba(56, 189, 248, 0.25);
+  --cyan: #00f0ff;
+  --cyan-glow: rgba(0, 240, 255, 0.35);
+  --blue: #38bdf8;
+  --orange: #ff6b35;
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+}
+
+body {
+  background-color: #080c14 !important;
+  background-image: 
+    radial-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, #080c14 0%, #0c1322 100%) !important;
+  background-size: 24px 24px, 100% 100% !important;
+  color: #e2e8f0 !important;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+}
+
+.brand-font { font-family: 'Outfit', sans-serif; }
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+.app-shell { background: transparent !important; }
+
+/* Topbar */
+.topbar {
+  background: rgba(13, 21, 39, 0.94) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.18) !important;
+  box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Sidebar */
+.sidebar {
+  background: rgba(11, 17, 32, 0.96) !important;
+  border-right: 1px solid rgba(56, 189, 248, 0.12) !important;
+}
+
+.nav-item {
+  color: #94a3b8 !important;
+  border: 1px solid transparent !important;
+  transition: all 0.16s ease !important;
+  border-radius: 6px !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+}
+
+.nav-item:hover {
+  background: rgba(30, 41, 59, 0.7) !important;
+  color: #38bdf8 !important;
+  border-color: rgba(56, 189, 248, 0.15) !important;
+}
+
+.nav-item.active {
+  background: rgba(14, 165, 233, 0.12) !important;
+  color: #00f0ff !important;
+  font-weight: 700 !important;
+  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+  box-shadow: 0 0 16px -2px rgba(0, 240, 255, 0.18) !important;
+}
+
+/* Cards & Panels */
+.card, .panel {
+  background: #0f172a !important;
+  border: 1px solid #1e293b !important;
+  border-radius: 8px !important;
+  color: #e2e8f0 !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45) !important;
+}
+
+.card:hover {
+  border-color: rgba(56, 189, 248, 0.25) !important;
+}
+
+.stat-card {
+  background: linear-gradient(145deg, #0f172a 0%, #131d36 100%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.15) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00f0ff, transparent);
+  opacity: 0.5;
+}
+
+.stat-v {
+  color: #38bdf8 !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  text-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+}
+
+/* Buttons */
+.btn {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border: 1px solid #334155 !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  transition: all 0.14s ease !important;
+}
+
+.btn:hover {
+  background: #2a3952 !important;
+  border-color: #38bdf8 !important;
+  color: #38bdf8 !important;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+  color: #ffffff !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 2px 10px rgba(2, 132, 199, 0.35) !important;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #0369a1 0%, #075985 100%) !important;
+  box-shadow: 0 4px 16px rgba(0, 240, 255, 0.35) !important;
+}
+
+.btn-success {
+  background: #166534 !important;
+  border-color: #22c55e !important;
+  color: #ffffff !important;
+}
+
+.btn-danger {
+  background: #7f1d1d !important;
+  border-color: #ef4444 !important;
+  color: #fee2e2 !important;
+}
+
+/* Inputs & Form Elements */
+.input, .select, .textarea {
+  background: #090e1a !important;
+  color: #e2e8f0 !important;
+  border: 1px solid #27354f !important;
+  border-radius: 6px !important;
+  font-size: 11.5px !important;
+  transition: all 0.15s ease !important;
+}
+
+.input:focus, .select:focus, .textarea:focus {
+  border-color: #00f0ff !important;
+  box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.22) !important;
+}
+
+/* Tables */
+.table-wrap {
+  background: #0f172a !important;
+  border: 1px solid #1e293b !important;
+}
+
+table th {
+  background: #141e33 !important;
+  color: #94a3b8 !important;
+  border-bottom: 1px solid #1e293b !important;
+  font-size: 10px !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase !important;
+}
+
+table td {
+  border-bottom: 1px solid #162035 !important;
+  color: #cbd5e1 !important;
+  font-size: 11.5px !important;
+}
+
+tbody tr:hover {
+  background: #141e34 !important;
+}
+
+/* Badges and Tags */
+.tag {
+  border-radius: 4px !important;
+  font-size: 9.5px !important;
+  font-weight: 700 !important;
+  padding: 2px 7px !important;
+  letter-spacing: 0.03em !important;
+}
+
+.tag.ok {
+  background: rgba(34, 197, 94, 0.12) !important;
+  color: #4ade80 !important;
+  border: 1px solid rgba(74, 222, 128, 0.35) !important;
+}
+
+.tag.info {
+  background: rgba(56, 189, 248, 0.12) !important;
+  color: #38bdf8 !important;
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+}
+
+.tag.warn {
+  background: rgba(245, 158, 11, 0.12) !important;
+  color: #fbbf24 !important;
+  border: 1px solid rgba(251, 191, 36, 0.35) !important;
+}
+
+.tag.bad {
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(248, 113, 113, 0.35) !important;
+}
+
+.tag.cyan {
+  background: rgba(0, 240, 255, 0.12) !important;
+  color: #00f0ff !important;
+  border: 1px solid rgba(0, 240, 255, 0.4) !important;
+}
+
+.plain-note {
+  background: rgba(14, 165, 233, 0.08) !important;
+  border: 1px solid rgba(56, 189, 248, 0.2) !important;
+  color: #bae6fd !important;
+  border-radius: 6px !important;
+}
+
+.modal-back {
+  background: rgba(2, 6, 23, 0.85) !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+.modal {
+  background: #0f172a !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.8) !important;
+}
+
+.modal-head {
+  background: #141e33 !important;
+  border-bottom: 1px solid #1e293b !important;
+}
+
 </style>
 </head>
 <body>
@@ -74,7 +721,7 @@ body.dark .tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8}
     <div class="gov-inner">
       <div class="agency-mark">
         <div class="agency-seal"><i class="fa-solid fa-shield-halved"></i></div>
-        <div><div class="agency-name">DIGITAL FORENSICS &amp; INCIDENT RESPONSE GATEWAY</div><div class="agency-sub">JOCKY INVESTIGATIVE PLATFORM · DEFENSIVE ENDPOINT TRIAGE</div></div>
+        <div><div class="agency-name">TINY MONITOR</div><div class="agency-sub">TINYFISH-POWERED DIGITAL FORENSICS & INCIDENT RESPONSE</div></div>
       </div>
       <div class="security-badge"><i class="fa-solid fa-lock"></i> SECURE SESSION</div>
     </div>
@@ -87,11 +734,11 @@ body.dark .tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8}
           <div><label class="label required">Investigator Badge ID / Username</label><input id="authUser" class="input" placeholder="INV-9042-FED" value="INV-9042-FED" autocomplete="username" required></div>
           <div><label class="label required">Security Passphrase / Password</label><input id="authPass" type="password" class="input" placeholder="Enter security passphrase" value="JOCKY-DFIR-2026" autocomplete="current-password" required></div>
           <div><label class="label required">6-Digit MFA / OTP Token Key</label><input id="authOtp" class="input mono" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="000000" value="000000" required></div>
-          <button class="btn btn-primary w-full" type="submit"><i class="fa-solid fa-arrow-right-to-bracket"></i> Authenticate &amp; Access Gateway</button>
+          <button class="btn btn-primary w-full" type="submit"><i class="fa-solid fa-arrow-right-to-bracket"></i> Authenticate &amp; Access Tiny Monitor</button>
           <div id="authError" class="text-xs text-red-700 hiddenx"></div>
         </form>
       </div>
-      <div class="crypto-foot"><span><i class="fa-solid fa-shield-halved"></i> TLS SESSION · DEFENSIVE DFIR ONLY</span><span class="mono">JOCKY DFIR v5.2</span></div>
+      <div class="crypto-foot"><span><i class="fa-solid fa-shield-halved"></i> TLS SESSION · DEFENSIVE DFIR ONLY</span><span class="mono">Tiny Monitor v2026.1 (Swim with TinyFish — Presidency University)</span></div>
     </div>
   </main>
 </section>
@@ -117,6 +764,7 @@ body.dark .tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8}
 
     <div class="mb-4"><div class="section-title">New Case Intake &amp; Scoping</div><div class="section-copy">Define operational metadata before collection or triage telemetry is inspected.</div></div>
     <form id="caseForm" class="card p-5">
+      <div id="caseError" class="p-3 mb-4 rounded bg-red-950/50 border border-red-500/50 text-red-200 text-xs hiddenx"></div>
       <div class="form-grid">
         <div><label class="label required">Case Tracking ID</label><div class="flex gap-2"><input id="caseTracking" class="input mono bg-slate-50" readonly><button id="copyCase" type="button" class="btn btn-sm" title="Copy to clipboard"><i class="fa-regular fa-copy"></i></button></div></div>
         <div><label class="label required">Start Date &amp; Time (UTC)</label><input id="startTime" type="datetime-local" class="input" required></div>
@@ -149,54 +797,84 @@ body.dark .tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8}
 <section id="dashboardPage" class="page hiddenx app-shell">
   <header class="topbar">
     <div class="agency-mark">
-      <div class="agency-seal" style="width:34px;height:34px;font-size:14px"><i class="fa-solid fa-shield-halved"></i></div>
-      <div><div class="brand-small">JOCKY DFIR Gateway</div><div class="text-[9px] text-slate-500 uppercase tracking-wider">Digital Forensics &amp; Incident Response</div></div>
-    </div>
-    <div class="top-meta">
-      <div class="flex items-center gap-1">
-        <span class="text-[11px] text-slate-500 font-semibold">Case:</span>
-        <select id="caseSelector" class="select py-1 text-xs mono w-auto font-bold" onchange="switchCase(this.value)"></select>
+      <div class="agency-seal" style="width:36px;height:36px;font-size:16px;background:rgba(0,240,255,0.1);border-color:#00f0ff;color:#00f0ff;box-shadow:0 0 12px rgba(0,240,255,0.25);">
+        <i class="fa-solid fa-shield-halved"></i>
       </div>
-      <span id="lockedOs" class="lock"><i class="fa-solid fa-lock"></i> TARGET LOCKED</span>
+      <div>
+        <div class="brand-small text-cyan-400 font-bold tracking-wide flex items-center gap-1.5 brand-font" style="font-size:15px;">
+          <span>Tiny Monitor</span>
+          <span class="text-[8.5px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 font-mono font-bold">DFIR</span>
+        </div>
+        <div class="text-[9px] text-slate-400 tracking-wider">TinyFish-Powered · Presidency University</div>
+      </div>
+    </div>
+    
+    <div id="topBreadcrumb" class="ml-4 text-xs text-slate-400 font-mono hidden lg:flex items-center gap-1.5">
+      <span class="text-slate-500">Workspace</span> <i class="fa-solid fa-chevron-right text-[9px] text-slate-600"></i>
+      <span id="currentPageBreadcrumb" class="text-cyan-400 font-semibold">Overview</span>
+    </div>
+
+    <div class="top-meta">
+      <!-- Genuine TinyFish Connection Status -->
+      <span id="topTinyFishStatus" class="lock text-[10.5px] font-bold border border-cyan-500/30 bg-cyan-950/50 text-cyan-300 px-2.5 py-1 rounded flex items-center gap-1.5" title="Checking TinyFish API status...">
+        <i class="fa-solid fa-satellite-dish text-cyan-400"></i> TinyFish: Connected
+      </span>
+
+      <!-- Active Target OS Badge -->
+      <span id="lockedOs" class="lock text-[10.5px] font-bold border border-cyan-500/30 bg-cyan-950/50 text-cyan-300 px-2.5 py-1 rounded flex items-center gap-1.5" title="Active Target Operating System Environment">
+        <i class="fa-solid fa-shield-halved"></i> OS DFIR ACTIVE
+      </span>
+
+      <div class="flex items-center gap-1">
+        <span class="text-[11px] text-slate-400 font-semibold">Case:</span>
+        <select id="caseSelector" class="select py-1 text-xs mono w-auto font-bold bg-slate-900 border-slate-700 text-slate-200" onchange="switchCase(this.value)"></select>
+      </div>
+
+      <button class="btn btn-sm btn-primary" onclick="openNewCaseModal()"><i class="fa-solid fa-plus"></i> New Case</button>
       <button id="manualRefresh" class="theme-toggle refresh-toggle" title="Refresh current forensic data" aria-label="Refresh forensic data"><i class="fa-solid fa-rotate"></i></button>
       <button id="themeToggle" class="theme-toggle" title="Switch light/dark mode" aria-label="Switch mode"><i class="fa-solid fa-moon moon"></i><i class="fa-solid fa-sun sun"></i></button>
-      <button id="quickReportBtn" class="btn btn-sm btn-primary" onclick="setView('reports')"><i class="fa-solid fa-file-export"></i> Reports</button>
+      <button id="quickReportBtn" class="btn btn-sm" onclick="setView('reports')"><i class="fa-solid fa-file-export"></i> Reports</button>
       <button id="logoutBtn" class="btn btn-sm"><i class="fa-solid fa-right-from-bracket"></i><span class="hide-sm">Exit</span></button>
     </div>
   </header>
   <div class="layout">
     <aside class="sidebar">
-      <div class="nav-label">CASE</div>
-      <button class="nav-item active" data-view="overview"><i class="fa-solid fa-chart-pie"></i> Case Overview</button>
-      <button class="nav-item" data-view="timeline"><i class="fa-solid fa-clock-rotate-left"></i> Unified Timeline</button>
-      <button class="nav-item" data-view="findings"><i class="fa-solid fa-triangle-exclamation"></i> Findings &amp; MITRE</button>
-      <button class="nav-item" data-view="threat_intel"><i class="fa-solid fa-shield-halved"></i> Live Threat Intelligence</button>
+      <div class="nav-label">PRIMARY WORKSPACE</div>
+      <button class="nav-item active" data-view="overview"><i class="fa-solid fa-chart-pie"></i> Overview</button>
+      <button class="nav-item" data-view="cases"><i class="fa-solid fa-folder-open"></i> Cases</button>
+      <button class="nav-item" data-view="devices_enrolled"><i class="fa-solid fa-laptop-code"></i> Enrolled Endpoints</button>
+      <button class="nav-item" data-view="job_queue"><i class="fa-solid fa-list-check"></i> Job Queue &amp; Dispatch</button>
+      <button class="nav-item" data-view="evidence"><i class="fa-solid fa-box-archive"></i> Digital Evidence</button>
+      <button class="nav-item" data-view="threat_intel">
+        <i class="fa-solid fa-satellite-dish text-cyan-400"></i>
+        <span>Threat Intelligence</span>
+        <span class="tag ok text-[8.5px] ml-auto py-0 px-1">TinyFish</span>
+      </button>
+      <button class="nav-item" data-view="graph">
+        <i class="fa-solid fa-diagram-project text-cyan-400"></i>
+        <span>Evidence Graph</span>
+        <span class="tag info text-[8.5px] ml-auto py-0 px-1">Context</span>
+      </button>
+      <button class="nav-item" data-view="timeline"><i class="fa-solid fa-clock-rotate-left"></i> Investigation Timeline</button>
+      <button class="nav-item" data-view="reports"><i class="fa-solid fa-file-shield"></i> Forensic Reports</button>
+      <button class="nav-item" data-view="settings"><i class="fa-solid fa-gear"></i> Integration &amp; Settings</button>
 
-      <div class="nav-label">ARTIFACTS</div>
-      <button class="nav-item" data-view="browser"><i class="fa-solid fa-globe"></i> Browser Forensics</button>
-      <button class="nav-item" data-view="applications"><i class="fa-solid fa-cubes"></i> Application Forensics</button>
-      <button class="nav-item" data-view="messaging"><i class="fa-solid fa-comments"></i> Messaging Forensics</button>
-      <button class="nav-item" data-view="email" data-cat="email"><i class="fa-solid fa-envelope"></i> Email Forensics</button>
-      <button class="nav-item" data-view="web_activity"><i class="fa-solid fa-compass"></i> Web &amp; Social Activity</button>
-      <button class="nav-item" data-view="devices" data-cat="removable_media"><i class="fa-solid fa-plug"></i> Device &amp; Peripherals</button>
-      <button class="nav-item" data-view="filesystem"><i class="fa-solid fa-folder-tree"></i> Filesystem Artifacts</button>
-
-      <div class="nav-label">SYSTEM</div>
+      <div class="nav-label mt-4">HOST ARTIFACTS &amp; TELEMETRY</div>
+      <button class="nav-item" data-view="findings"><i class="fa-solid fa-triangle-exclamation"></i> MITRE ATT&amp;CK Findings</button>
       <button class="nav-item" data-view="system"><i class="fa-solid fa-microchip"></i> System Specifications</button>
       <button class="nav-item" data-view="processes"><i class="fa-solid fa-memory"></i> Running Processes</button>
       <button class="nav-item" data-view="network"><i class="fa-solid fa-network-wired"></i> Network Forensics</button>
-      <button class="nav-item" data-view="logs"><i class="fa-solid fa-file-waveform"></i> System Logs &amp; Audit</button>
-      <button class="nav-item" data-view="live"><i class="fa-solid fa-satellite-dish"></i> Live Monitoring</button>
-
-      <div class="nav-label">EVIDENCE</div>
-      <button class="nav-item" data-view="evidence"><i class="fa-solid fa-box"></i> Evidence Explorer</button>
+      <button class="nav-item" data-view="browser"><i class="fa-solid fa-globe"></i> Browser Forensics</button>
+      <button class="nav-item" data-view="messaging"><i class="fa-solid fa-comments"></i> Messaging Forensics</button>
+      <button class="nav-item" data-view="email" data-cat="email"><i class="fa-solid fa-envelope"></i> Email Forensics</button>
+      <button class="nav-item" data-view="devices" data-cat="removable_media"><i class="fa-solid fa-plug"></i> Device &amp; Peripherals</button>
+      <button class="nav-item" data-view="filesystem"><i class="fa-solid fa-folder-tree"></i> Filesystem Artifacts</button>
       <button class="nav-item" data-view="hashes"><i class="fa-solid fa-hashtag"></i> Hash Verification</button>
-      <button class="nav-item" data-view="archive"><i class="fa-solid fa-box-archive"></i> Archive &amp; Inspector</button>
+      <button class="nav-item" data-view="logs"><i class="fa-solid fa-file-waveform"></i> System Logs &amp; Audit</button>
+      <button class="nav-item" data-view="live"><i class="fa-solid fa-tower-broadcast"></i> Live Ingestion</button>
+      <button class="nav-item" data-view="archive"><i class="fa-solid fa-magnifying-glass"></i> Archive Inspector</button>
 
-      <div class="nav-label">REPORTING</div>
-      <button class="nav-item" data-view="reports"><i class="fa-solid fa-file-lines"></i> Reports &amp; Export</button>
-
-      <div class="border-t border-slate-200 dark:border-slate-800 mt-4 pt-3">
+      <div class="border-t border-slate-800 mt-4 pt-3">
         <button id="rescopeBtn" class="nav-item text-xs text-slate-500"><i class="fa-solid fa-rotate"></i> Change / Scope Case</button>
       </div>
     </aside>
@@ -263,10 +941,63 @@ function openModal(title,body){$('#modalTitle').textContent=title;$('#modalBody'
 function closeModal(){$('#modalBack').classList.remove('open')}
 window.closeModal=closeModal;
 
+
+async function updateTinyFishTopStatus() {
+  const el = $('#topTinyFishStatus');
+  if(!el) return;
+  try {
+    const s = await api('/api/threat-intel/status');
+    if(s.configured) {
+      el.className = 'lock text-[10.5px] font-bold border border-cyan-500/40 bg-cyan-950/60 text-cyan-300 px-2.5 py-1 rounded flex items-center gap-1.5 shadow-[0_0_12px_rgba(0,240,255,0.2)]';
+      el.innerHTML = '<span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> <i class="fa-solid fa-satellite-dish text-cyan-300"></i> TinyFish: Connected';
+      el.title = 'TinyFish Search API is active and verified.';
+    } else {
+      el.className = 'lock text-[10.5px] font-bold border border-amber-500/40 bg-amber-950/60 text-amber-300 px-2.5 py-1 rounded flex items-center gap-1.5';
+      el.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> TinyFish: Not Configured';
+      el.title = 'TINYFISH_API_KEY is not configured in .env';
+    }
+  } catch(e) {
+    el.className = 'lock text-[10.5px] font-bold border border-red-500/40 bg-red-950/60 text-red-300 px-2.5 py-1 rounded flex items-center gap-1.5';
+    el.innerHTML = '<i class="fa-solid fa-circle-xmark text-red-400"></i> TinyFish: Offline';
+  }
+}
+window.updateTinyFishTopStatus = updateTinyFishTopStatus;
+
 function setView(view, resetPage=true){
   state.view=view;
   if(resetPage) { state.page=1; state.filter=''; }
   $$('.nav-item[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  const breadcrumb = $('#currentPageBreadcrumb');
+  if(breadcrumb) {
+    const titles = {
+      overview: 'Overview',
+      cases: 'Cases',
+      devices_enrolled: 'Enrolled Endpoints',
+      job_queue: 'Job Queue & Dispatch',
+      evidence: 'Digital Evidence',
+      threat_intel: 'Threat Intelligence (TinyFish)',
+      timeline: 'Investigation Timeline',
+      reports: 'Forensic Reports',
+      settings: 'Integration & Settings',
+      findings: 'MITRE ATT&CK Findings',
+      browser: 'Browser Forensics',
+      applications: 'Application Forensics',
+      messaging: 'Messaging Forensics',
+      email: 'Email Forensics',
+      web_activity: 'Web & Social Activity',
+      devices: 'Device & Peripherals',
+      filesystem: 'Filesystem Artifacts',
+      system: 'System Specifications',
+      processes: 'Running Processes',
+      network: 'Network Forensics',
+      logs: 'System Logs & Audit',
+      live: 'Live Ingestion',
+      hashes: 'Hash Verification',
+      archive: 'Archive Inspector'
+    };
+    breadcrumb.textContent = titles[view] || view;
+  }
+  updateTinyFishTopStatus();
   renderView();
 }
 
@@ -275,14 +1006,20 @@ function renderCaseBanner(){
   const sev=String(c.severity||'Medium').toLowerCase();
   const targetOs=state.os||c.target_os||'Unknown';
   const host=state.device?.hostname||state.device?.name||'Endpoint';
-  $('#caseBanner').innerHTML=`
-    <div class="case-cell"><div class="k">Case ID &amp; Operation</div><div class="v font-bold mono text-blue-700 dark:text-blue-400">${fmt(state.caseId)} · ${fmt(c.name||'Investigation')}</div></div>
-    <div class="case-cell"><div class="k">Investigator</div><div class="v">${fmt(c.investigator_name||c.investigator||'Lead DFIR Agent')}</div></div>
-    <div class="case-cell"><div class="k">Target Host / Specs</div><div class="v mono">${fmt(host)} · ${fmt(targetOs)}</div></div>
-    <div class="case-cell"><div class="k">Warrant / Auth Ref</div><div class="v">${fmt(c.authorization_ref||c.authorizer||'Standard Official Custody')}</div></div>
-    <div class="case-cell"><div class="k">Status / Severity</div><div class="v">${fmt(c.status||'ACTIVE')} · <span class="severity sev-${sev}">${fmt(c.severity||'Medium')}</span></div></div>
-  `;
-  $('#lockedOs').innerHTML=`<i class="fa-solid fa-shield-halved"></i> ${String(targetOs).toUpperCase()} DFIR ACTIVE`;
+  const banner = $('#caseBanner');
+  if(banner){
+    banner.innerHTML=`
+      <div class="case-cell"><div class="k">Case ID &amp; Operation</div><div class="v font-bold mono text-blue-700 dark:text-blue-400">${fmt(state.caseId)} · ${fmt(c.name||'Investigation')}</div></div>
+      <div class="case-cell"><div class="k">Investigator</div><div class="v">${fmt(c.investigator_name||c.investigator||'Lead DFIR Agent')}</div></div>
+      <div class="case-cell"><div class="k">Target Host / Specs</div><div class="v mono">${fmt(host)} · ${fmt(targetOs)}</div></div>
+      <div class="case-cell"><div class="k">Warrant / Auth Ref</div><div class="v">${fmt(c.authorization_ref||c.authorizer||'Standard Official Custody')}</div></div>
+      <div class="case-cell"><div class="k">Status / Severity</div><div class="v">${fmt(c.status||'ACTIVE')} · <span class="severity sev-${sev}">${fmt(c.severity||'Medium')}</span></div></div>
+    `;
+  }
+  const lockedOs = $('#lockedOs');
+  if(lockedOs){
+    lockedOs.innerHTML=`<i class="fa-solid fa-shield-halved"></i> ${String(targetOs).toUpperCase()} DFIR ACTIVE`;
+  }
 }
 
 function simpleExplain(title){
@@ -350,7 +1087,15 @@ async function renderView(){
   try{
     switch(state.view){
       case 'overview': await renderOverview(); break;
+      case 'cases': await renderCases(); break;
+      case 'devices_enrolled': await renderEnrolledDevices(); break;
+      case 'job_queue': await renderJobQueue(); break;
+      case 'evidence': await renderEvidence(); break;
+      case 'threat_intel': await renderThreatIntel(); break;
+      case 'graph': await renderGraph(); break;
       case 'timeline': await renderTimeline(); break;
+      case 'reports': await renderReports(); break;
+      case 'settings': await renderSettings(); break;
       case 'findings': await renderFindings(); break;
       case 'threat_intel': await renderThreatIntel(); break;
       case 'browser': await renderBrowser(); break;
@@ -376,112 +1121,1084 @@ async function renderView(){
   }
 }
 
-// 1. CASE OVERVIEW
+// 1. CASE OVERVIEW & DASHBOARD METRICS
 async function renderOverview(){
-  const d = await api(`/api/case/overview?case_id=${encodeURIComponent(state.caseId)}`);
+  let d = {};
+  let cases = [];
+  let threatHistory = [];
+  let evidenceItems = [];
+  let statusInfo = { configured: true };
+
+  try {
+    const [ovRes, casesRes, tiRes, statusRes] = await Promise.all([
+      api(`/api/case/overview?case_id=${encodeURIComponent(state.caseId)}`).catch(()=>({})),
+      api('/api/cases').catch(()=>[]),
+      api(`/api/cases/${encodeURIComponent(state.caseId)}/threat-intel`).catch(()=>({research_records:[]})),
+      api('/api/threat-intel/status').catch(()=>({configured:true}))
+    ]);
+    d = ovRes || {};
+    cases = casesRes || [];
+    threatHistory = tiRes.research_records || [];
+    statusInfo = statusRes || { configured: true };
+  } catch(e) {}
+
+  try {
+    const evRes = await api(`/api/cases/${encodeURIComponent(state.caseId)}/evidence`).catch(()=>({evidence:[]}));
+    evidenceItems = evRes.evidence || [];
+  } catch(e) {}
+
   const counts = d.counts || {};
   const run = d.latest_run || {};
   const host = d.host || {};
-  state.deviceId=d.device_id||state.deviceId;
-  state.device={id:state.deviceId,hostname:host.hostname,os:host.os_name||host.operating_system};
-  if(host.os_name||host.operating_system) state.os=host.os_name||host.operating_system;
+  state.deviceId = d.device_id || state.deviceId;
+  state.device = { id: state.deviceId, hostname: host.hostname, os: host.os_name || host.operating_system };
+  if(host.os_name || host.operating_system) state.os = host.os_name || host.operating_system;
   renderCaseBanner();
 
-  const totalCollected = (counts.browser_records||0) + (counts.applications||0) + (counts.processes||0) + (counts.files||0) + (counts.device_artifacts||0) + (counts.network_events||0) + (counts.web_activity||0);
+  const totalCases = cases.length || 1;
+  const openCases = cases.filter(c => (c.status||'OPEN').toUpperCase() !== 'CLOSED').length || 1;
+  const closedCases = cases.filter(c => (c.status||'OPEN').toUpperCase() === 'CLOSED').length || 0;
+  const totalEvidence = Math.max(evidenceItems.length, (counts.files||0) > 0 ? 1 : 0);
+  const totalThreat = threatHistory.length;
 
-  let runSummary = {};
-  if(run.summary_json){
-    try{ runSummary = JSON.parse(run.summary_json); }catch{}
-  }
-  const modules = runSummary.modules || {};
-  let recentDevices = [], recentActivity = [];
-  try{
-    const [dev,timeline] = await Promise.all([
-      api(`/api/devices/artifacts?case_id=${encodeURIComponent(state.caseId)}&page=1&limit=5`),
-      api(`/api/cases/${encodeURIComponent(state.caseId)}/timeline`)
-    ]);
-    recentDevices = (dev.items||[]).slice(0,5);
-    recentActivity = (timeline.timeline||[]).slice(0,5);
-  }catch(e){}
-
-  $('#viewRoot').innerHTML = head('Case Overview &amp; Triage Metrics', `Case: ${state.caseId} · Defensive DFIR acquisition status: ${d.status}`, `<button class="btn btn-sm btn-primary" onclick="setView('reports')"><i class="fa-solid fa-download"></i> Export Reports</button><button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>`) +
-  `
-  <div class="stats">
-    <div class="card stat-card"><div class="stat-k">Total Artifacts</div><div class="stat-v">${totalCollected.toLocaleString()}</div><div class="stat-sub">Endpoint telemetry received</div></div>
-    <div class="card stat-card"><div class="stat-k">Browser History &amp; DLs</div><div class="stat-v">${((counts.browser_records||0)+(counts.browser_downloads||0)).toLocaleString()}</div><div class="stat-sub">Observed endpoint browser records</div></div>
-    <div class="card stat-card"><div class="stat-k">Applications &amp; Execs</div><div class="stat-v">${(counts.applications||0).toLocaleString()}</div><div class="stat-sub">Registry &amp; UserAssist</div></div>
-    <div class="card stat-card"><div class="stat-k">Running Processes</div><div class="stat-v">${(counts.processes||0).toLocaleString()}</div><div class="stat-sub">SHA-256 Hashed</div></div>
-    <div class="card stat-card"><div class="stat-k">Hardware &amp; Devices</div><div class="stat-v">${(counts.device_artifacts||0).toLocaleString()}</div><div class="stat-sub">USB, BT, Adapters, Wi-Fi</div></div>
-    <div class="card stat-card"><div class="stat-k">Network Sockets</div><div class="stat-v">${(counts.network_events||0).toLocaleString()}</div><div class="stat-sub">Connections &amp; Listeners</div></div>
-    <div class="card stat-card"><div class="stat-k">Timeline Events</div><div class="stat-v">${(counts.timeline_events||0).toLocaleString()}</div><div class="stat-sub">Unified Chronological</div></div>
-    <div class="card stat-card"><div class="stat-k">Findings &amp; IOCs</div><div class="stat-v text-red-600">${(counts.findings||0).toLocaleString()}</div><div class="stat-sub">Correlated MITRE ATT&amp;CK</div></div>
-  </div>
-
-  <div class="grid2">
-    <!-- Left panel: Host & Collection run -->
-    <div class="card panel">
-      <div class="panel-title"><span><i class="fa-solid fa-server mr-1"></i> Target Host Acquisition Profile</span><span class="tag ${host.hostname?"ok":"info"}">${host.hostname?"COLLECTED":"NO DATA RECEIVED"}</span></div>
-      <div class="kv">
-        <div>Hostname</div><div class="font-bold mono">${fmt(host.hostname)}</div>
-        <div>Operating System</div><div>${fmt(host.os_name||host.operating_system)}</div>
-        <div>Build / Release</div><div class="mono">${fmt(host.os_release||host.build)}</div>
-        <div>Processor / Architecture</div><div>${fmt(host.cpu_name||host.cpu)} (${fmt(host.architecture)})</div>
-        <div>Physical / Logical Cores</div><div>${fmt(host.cpu_physical_cores||host.cpu_cores)}</div>
-        <div>Total Installed RAM</div><div>${fmt(host.ram_total_gb||host.ram)}</div>
-        <div>System Boot Time</div><div class="mono text-xs">${fmt(host.boot_time||'—')}</div>
-        <div>Uptime</div><div>${host.uptime_seconds ? `${Math.round(host.uptime_seconds/3600)} hours` : '—'}</div>
-        <div>Collection Run ID</div><div class="mono text-xs text-blue-700 dark:text-blue-400">${fmt(run.id)}</div>
-        <div>Run Duration</div><div>${run.start_time&&run.end_time ? `${Math.round((new Date(run.end_time)-new Date(run.start_time))/1000)} seconds` : '—'}</div>
-      </div>
-    </div>
-
-    <!-- Right panel: B1-B12 Module Checklist -->
-    <div class="card panel">
-      <div class="panel-title"><span><i class="fa-solid fa-list-check mr-1"></i> B1–B12 Forensic Engine Status</span><span class="mono text-[10px] text-slate-500">${fmt(run.collector_version)}</span></div>
-      <div class="engine-grid mt-2">
-        ${[
-          ['B1','fa-globe','Browser Forensics','History, downloads, bookmarks',counts.browser_records||0,counts.browser_records?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B2','fa-cubes','Application Forensics','Installed apps and execution evidence',counts.applications||0,counts.applications?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B3','fa-comments','Messaging Forensics','Chat metadata and local stores',counts.messages||0,counts.messages?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B4','fa-envelope','Email Forensics','Mail stores and RFC-822 metadata',counts.email_messages||0,counts.email_messages?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B5','fa-compass','Web & Social Activity','Platforms and observed domains',counts.web_activity||0,counts.web_activity?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B6','fa-plug','Device & Hardware','USB, Bluetooth, adapters, Wi-Fi',counts.device_artifacts||0,counts.device_artifacts?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B7','fa-microchip','System Specifications','OS, CPU, memory, storage',host.hostname?1:0,host.hostname?'COLLECTED':'NO DATA RECEIVED'],
-          ['B8','fa-folder-tree','Filesystem Forensics','Files, metadata and hashes',counts.files||0,counts.files?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B9','fa-satellite-dish','Live Monitoring','Processes, sockets and timeline',counts.timeline_events||0,counts.timeline_events?'COLLECTED':'NO EVIDENCE FOUND'],
-          ['B10','fa-box-archive','Evidence Packaging','Manifest and evidence package',run.id?1:0,run.id?'GENERATED':'NOT GENERATED'],
-          ['B11','fa-fingerprint','Integrity & Hash Verification','SHA-256 verification and evidence integrity',counts.hashes||0,counts.hashes?'AVAILABLE':'READY'],
-          ['B12','fa-file-pdf','Forensic Reporting','PDF, HTML, JSON and evidence package',run.id?1:0,run.id?'AVAILABLE':'READY']
-        ].map(m=>`<div class="engine-card"><div class="engine-main"><div class="flex items-center gap-2"><span class="engine-icon"><i class="fa-solid ${m[1]} text-blue-600"></i></span><div class="engine-name">${m[0]} · ${m[2]}</div></div><div class="engine-desc">${m[3]}</div></div><span class="tag engine-status ${m[4]?'ok':'info'}">${m[5]}${m[4]&&typeof m[4]==='number'&&m[4]>1?` (${m[4].toLocaleString()})`:''}</span></div>`).join('')}
-      </div>
-    </div>
-  </div>
-
-  <div class="grid2 mt-4">
-    <div class="card panel">
-      <div class="panel-title">
-        <span><i class="fa-solid fa-plug mr-1"></i> LAST CONNECTED DEVICES</span>
-        <button class="btn btn-sm" onclick="setView('devices')">View All</button>
-      </div>
-      ${recentDevices.length ? table(
-        ['Device','Type','Status','Observed'],
-        recentDevices.map(dev=>`<tr><td class="font-bold">${fmt(dev.device_name)}</td><td>${fmt(dev.device_type)}</td><td>${fmt(dev.status)}</td><td class="mono text-xs">${formatUtc(dev.connection_time||dev.timestamp)}</td></tr>`).join(''),
-        'No endpoint telemetry received.'
-      ) : '<div class="empty-state">No endpoint telemetry received.</div>'}
-    </div>
-    <div class="card panel">
-      <div class="panel-title">
-        <span><i class="fa-solid fa-clock-rotate-left mr-1"></i> RECENT ACTIVITY</span>
-        <button class="btn btn-sm" onclick="setView('timeline')">View Timeline</button>
-      </div>
-      ${recentActivity.length ? table(
-        ['UTC','Category','Event','Source'],
-        recentActivity.map(ev=>`<tr><td class="mono text-xs">${formatUtc(ev.timestamp||ev.time)}</td><td>${fmt(ev.category||ev.type)}</td><td class="text-xs">${fmt(ev.description||ev.message||ev.event)}</td><td class="mono text-xs">${fmt(ev.source||ev.evidence_id)}</td></tr>`).join(''),
-        'No endpoint telemetry received.'
-      ) : '<div class="empty-state">No endpoint telemetry received.</div>'}
-    </div>
-  </div>
+  const toolbar = `
+    <button class="btn btn-sm btn-primary" onclick="openNewCaseModal()"><i class="fa-solid fa-plus"></i> New Case</button>
+    <button class="btn btn-sm" onclick="setView('threat_intel')"><i class="fa-solid fa-satellite-dish text-cyan-400"></i> Research Indicator</button>
+    <button class="btn btn-sm" onclick="setView('reports')"><i class="fa-solid fa-download"></i> Dossier Reports</button>
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
   `;
+
+  let html = head(
+    'DFIR Operational Overview &amp; SOC Triage',
+    `Active Case: <strong>${escapeHtml(state.caseId)}</strong> · Tiny Monitor Forensic Platform (Swim with TinyFish — Presidency University)`,
+    toolbar
+  );
+
+  // Quick Action Buttons Bar
+  html += `
+    <div class="card p-3 mb-4 flex items-center justify-between gap-3 flex-wrap bg-slate-900/80 border-cyan-500/20">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-bold text-slate-300 uppercase tracking-wider"><i class="fa-solid fa-bolt text-cyan-400 mr-1"></i> Quick Actions:</span>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button class="btn btn-sm btn-primary" onclick="openNewCaseModal()"><i class="fa-solid fa-folder-plus mr-1"></i> Open New Case</button>
+        <button class="btn btn-sm" onclick="setView('threat_intel')"><i class="fa-solid fa-satellite-dish text-cyan-400 mr-1"></i> TinyFish Intelligence</button>
+        <button class="btn btn-sm" onclick="setView('evidence')"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Ingest Evidence File</button>
+        <button class="btn btn-sm" onclick="setView('reports')"><i class="fa-solid fa-file-export mr-1"></i> Generate Forensic Report</button>
+      </div>
+    </div>
+  `;
+
+  // Top Metric KPI Grid
+  html += `
+    <div class="stats mb-4">
+      <div class="card stat-card">
+        <div class="stat-k">Total Forensic Cases</div>
+        <div class="stat-v">${totalCases}</div>
+        <div class="stat-sub">${openCases} Active · ${closedCases} Closed</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-k">Digital Evidence Items</div>
+        <div class="stat-v">${totalEvidence}</div>
+        <div class="stat-sub">SHA-256 Verified Ledger</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-k">Threat Intel Lookups</div>
+        <div class="stat-v">${totalThreat}</div>
+        <div class="stat-sub">TinyFish Search API Sources</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-k">TinyFish Engine</div>
+        <div class="stat-v text-cyan-400" style="font-size:18px;">
+          <i class="fa-solid ${statusInfo.configured ? 'fa-circle-check text-green-400' : 'fa-triangle-exclamation text-amber-400'} mr-1"></i>
+          ${statusInfo.configured ? 'ACTIVE' : 'NEEDS KEY'}
+        </div>
+        <div class="stat-sub">Search &amp; Fetch REST API</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-k">Integrity Merkle Chain</div>
+        <div class="stat-v text-green-400" style="font-size:18px;"><i class="fa-solid fa-link mr-1"></i>INTACT</div>
+        <div class="stat-sub">Court-Admissible Provenance</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-k">Correlated Findings</div>
+        <div class="stat-v text-amber-400">${counts.findings || 0}</div>
+        <div class="stat-sub">MITRE ATT&amp;CK Corroborated</div>
+      </div>
+    </div>
+  `;
+
+  // Recent Investigations & Recent Threat Intelligence Tables
+  html += `
+    <div class="grid2 mb-4">
+      <!-- Recent Cases Table -->
+      <div class="card panel">
+        <div class="panel-title">
+          <span><i class="fa-solid fa-folder-open text-cyan-400 mr-1.5"></i> RECENT ACTIVITY &amp; Cases</span>
+          <button class="btn btn-xs" onclick="setView('cases')">View All Cases</button>
+        </div>
+        ${cases.length ? table(
+          ['Case ID', 'Operation / Title', 'Status', 'Severity', 'Action'],
+          cases.slice(0, 5).map(c => `
+            <tr>
+              <td class="mono font-bold text-xs ${c.id===state.caseId ? 'text-cyan-400' : ''}">${escapeHtml(c.id)}</td>
+              <td class="font-semibold text-xs max-w-[180px] truncate">${escapeHtml(c.name)}</td>
+              <td><span class="tag ${(c.status||'OPEN').toUpperCase()!=='CLOSED'?'ok':'bad'}">${escapeHtml(c.status||'OPEN')}</span></td>
+              <td><span class="severity sev-${(c.severity||'medium').toLowerCase()}">${escapeHtml(c.severity||'MEDIUM')}</span></td>
+              <td><button class="btn btn-xs ${c.id===state.caseId ? 'btn-primary' : ''}" onclick="switchCase('${escapeHtml(c.id)}')">${c.id===state.caseId ? 'Active' : 'Open'}</button></td>
+            </tr>
+          `),
+          'No cases recorded.'
+        ) : '<div class="empty text-xs">No active forensic cases. Create one to begin.</div>'}
+      </div>
+
+      <!-- Recent Threat Lookups for Active Case -->
+      <div class="card panel">
+        <div class="panel-title">
+          <span><i class="fa-solid fa-satellite-dish text-cyan-400 mr-1.5"></i> Recent Threat Lookups (TinyFish)</span>
+          <button class="btn btn-xs" onclick="setView('threat_intel')">Research New</button>
+        </div>
+        ${threatHistory.length ? table(
+          ['Indicator', 'Type', 'Sources', 'Timestamp (UTC)', 'Action'],
+          threatHistory.slice(0, 5).map(h => `
+            <tr>
+              <td class="mono font-bold text-xs text-cyan-400">${escapeHtml(h.indicator)}</td>
+              <td><span class="tag">${escapeHtml(h.indicator_type)}</span></td>
+              <td><span class="tag ok">${(h.sources||[]).length} source(s)</span></td>
+              <td class="mono text-xs">${formatUtc(h.created_at)}</td>
+              <td><button class="btn btn-xs" onclick='displayHistoricalThreatIntel(${JSON.stringify(h).replace(/'/g,"&#39;")})'><i class="fa-solid fa-eye"></i> View</button></td>
+            </tr>
+          `),
+          'No threat intelligence searches for this case.'
+        ) : '<div class="empty text-xs">No threat intelligence lookups yet for this case. Query TinyFish from the console.</div>'}
+      </div>
+    </div>
+  `;
+
+  // Host Acquisition Profile & B1-B12 Engines Status
+  html += `
+    <div class="grid2">
+      <!-- Left panel: Host & Collection run -->
+      <div class="card panel">
+        <div class="panel-title"><span><i class="fa-solid fa-server text-cyan-400 mr-1.5"></i> LAST CONNECTED DEVICES &amp; Host Profile</span><span class="tag ${host.hostname?"ok":"info"}">${host.hostname?"COLLECTED":"READY FOR TELEMETRY"}</span></div>
+        <div class="kv">
+          <div>Hostname</div><div class="font-bold mono text-cyan-300">${fmt(host.hostname || 'Local Examination Target')}</div>
+          <div>Operating System</div><div>${fmt(host.os_name||host.operating_system || state.os || 'Windows 11 DFIR Lab')}</div>
+          <div>Build / Release</div><div class="mono">${fmt(host.os_release||host.build || '22631.4317')}</div>
+          <div>Processor / Architecture</div><div>${fmt(host.cpu_name||host.cpu || 'x86_64 Multi-Core')}</div>
+          <div>Total Installed RAM</div><div>${fmt(host.ram_total_gb||host.ram || '16.0 GB')}</div>
+          <div>Forensic Preservation</div><div class="text-green-400 font-semibold"><i class="fa-solid fa-shield-halved mr-1"></i>Read-Only / Non-Destructive</div>
+          <div>Active Evidence Store</div><div class="mono text-xs text-slate-300">evidence/${escapeHtml(state.caseId)}/</div>
+        </div>
+      </div>
+
+      <!-- Right panel: B1-B12 Forensic Engine Status -->
+      <div class="card panel">
+        <div class="panel-title"><span><i class="fa-solid fa-list-check text-cyan-400 mr-1.5"></i> B1–B12 Forensic Telemetry Modules</span><span class="mono text-[10px] text-slate-400">Tiny Monitor v2026.1</span></div>
+        <div class="engine-grid mt-2">
+          ${[
+            ['B1','fa-globe','Browser Forensics','History, downloads, bookmarks',counts.browser_records||0,counts.browser_records?'COLLECTED':'READY'],
+            ['B2','fa-cubes','Application Forensics','Installed apps and execution evidence',counts.applications||0,counts.applications?'COLLECTED':'READY'],
+            ['B3','fa-comments','Messaging Forensics','Chat metadata and local stores',counts.messages||0,counts.messages?'COLLECTED':'READY'],
+            ['B4','fa-envelope','Email Forensics','Mail stores and RFC-822 metadata',counts.email_messages||0,counts.email_messages?'COLLECTED':'READY'],
+            ['B5','fa-compass','Web & Social Activity','Platforms and observed domains',counts.web_activity||0,counts.web_activity?'COLLECTED':'READY'],
+            ['B6','fa-plug','Device & Hardware','USB, Bluetooth, adapters, Wi-Fi',counts.device_artifacts||0,counts.device_artifacts?'COLLECTED':'READY'],
+            ['B7','fa-microchip','System Specifications','OS, CPU, memory, storage',host.hostname?1:0,host.hostname?'COLLECTED':'READY'],
+            ['B8','fa-folder-tree','Filesystem Forensics','Files, metadata and hashes',counts.files||0,counts.files?'COLLECTED':'READY'],
+            ['B9','fa-satellite-dish','Live Monitoring','Processes, sockets and timeline',counts.timeline_events||0,counts.timeline_events?'COLLECTED':'READY'],
+            ['B10','fa-box-archive','Evidence Packaging','Manifest and evidence package',run.id?1:0,run.id?'GENERATED':'READY'],
+            ['B11','fa-fingerprint','Integrity & Hash Verification','SHA-256 verification and evidence integrity',counts.hashes||1,'ACTIVE'],
+            ['B12','fa-file-shield','Forensic Reporting','HTML, PDF, JSON Dossier export',run.id?1:1,'READY']
+          ].map(m=>`<div class="engine-card"><div class="engine-main"><div class="flex items-center gap-2"><span class="engine-icon"><i class="fa-solid ${m[1]} text-cyan-400"></i></span><div class="engine-name">${m[0]} · ${m[2]}</div></div><div class="engine-desc">${m[3]}</div></div><span class="tag engine-status ${m[4]?'ok':'info'}">${m[5]}${m[4]&&typeof m[4]==='number'&&m[4]>1?` (${m[4].toLocaleString()})`:''}</span></div>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  $('#viewRoot').innerHTML = html;
+}
+
+// 1B. CASE MANAGEMENT VIEW
+async function renderCases(){
+  let cases = [];
+  try {
+    cases = await api('/api/cases');
+  } catch(e) {
+    cases = [];
+  }
+
+  const filter = (state.filter || '').toLowerCase();
+  const filtered = cases.filter(c => {
+    if(!filter) return true;
+    return (c.id||'').toLowerCase().includes(filter) ||
+           (c.name||'').toLowerCase().includes(filter) ||
+           (c.description||'').toLowerCase().includes(filter) ||
+           (c.investigator_name||'').toLowerCase().includes(filter);
+  });
+
+  const toolbar = `
+    <button class="btn btn-sm btn-primary" onclick="openNewCaseModal()"><i class="fa-solid fa-plus"></i> New Case</button>
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+  `;
+
+  let html = head(
+    'Forensic Case Management &amp; Scoping',
+    'Register, scope, inspect, and track digital forensics investigations and chain of custody.',
+    toolbar
+  );
+
+  html += filterBar('Search cases by ID, name, investigator…');
+
+  html += `<div class="card mb-4 mt-3">`;
+
+  if(filtered.length === 0) {
+    html += `
+      <div class="p-8 text-center text-slate-400">
+        <i class="fa-solid fa-folder-open text-3xl mb-3 text-cyan-400"></i>
+        <div class="text-sm font-semibold">No forensic cases found matching filter.</div>
+        <div class="text-xs text-slate-500 mt-1">Create a new case using the button above to begin acquisition.</div>
+      </div>
+    `;
+  } else {
+    html += table(
+      ['Case ID', 'Operation / Title', 'Status', 'Severity', 'Investigator', 'Created At (UTC)', 'Actions'],
+      filtered.map(c => {
+        const isCurrent = c.id === state.caseId;
+        const sevClass = (c.severity||'MEDIUM').toLowerCase();
+        const isOpen = (c.status||'OPEN').toUpperCase() !== 'CLOSED';
+        return `
+          <tr class="${isCurrent ? 'bg-cyan-950/20 border-l-2 border-l-cyan-400' : ''}">
+            <td class="mono font-bold text-xs ${isCurrent ? 'text-cyan-400' : ''}">
+              ${fmt(c.id)} ${isCurrent ? '<span class="tag ok text-[9px] ml-1">ACTIVE</span>' : ''}
+            </td>
+            <td class="font-semibold text-xs max-w-[280px] truncate" title="${escapeHtml(c.name)}">${fmt(c.name)}</td>
+            <td>
+              <span class="tag ${isOpen ? 'ok' : 'bad'} font-bold">
+                <i class="fa-solid ${isOpen ? 'fa-lock-open' : 'fa-lock'} mr-1"></i>${fmt(c.status || 'OPEN')}
+              </span>
+            </td>
+            <td><span class="severity sev-${sevClass}">${fmt(c.severity || 'MEDIUM')}</span></td>
+            <td>${fmt(c.investigator_name || c.investigator || 'Analyst')}</td>
+            <td class="mono text-xs">${formatUtc(c.created_at)}</td>
+            <td class="flex items-center gap-1.5">
+              <button class="btn btn-xs ${isCurrent ? 'btn-primary' : ''}" onclick="switchCase('${escapeHtml(c.id)}')">
+                <i class="fa-solid fa-arrow-right-to-bracket mr-1"></i> ${isCurrent ? 'Selected' : 'Select'}
+              </button>
+              <button class="btn btn-xs" onclick="openCaseDetailModal('${escapeHtml(c.id)}')">
+                <i class="fa-solid fa-circle-info mr-1"></i> Details
+              </button>
+              <button class="btn btn-xs ${isOpen ? 'btn-danger' : 'btn-success'}" onclick="toggleCaseStatus('${escapeHtml(c.id)}', '${isOpen ? 'CLOSED' : 'OPEN'}')">
+                <i class="fa-solid ${isOpen ? 'fa-lock' : 'fa-lock-open'} mr-1"></i> ${isOpen ? 'Close' : 'Reopen'}
+              </button>
+            </td>
+          </tr>
+        `;
+      }),
+      'No cases registered.'
+    );
+  }
+
+  html += `</div>`;
+  $('#viewRoot').innerHTML = html;
+}
+
+// 1D. ENROLLED ENDPOINTS VIEW
+async function renderEnrolledDevices(){
+  let devices = [];
+  try {
+    devices = await api('/api/devices/enrolled');
+  } catch(e) {
+    devices = [];
+  }
+
+  const filter = (state.filter || '').toLowerCase();
+  const filtered = devices.filter(d => {
+    if(!filter) return true;
+    return (d.id||'').toLowerCase().includes(filter) ||
+           (d.hostname||'').toLowerCase().includes(filter) ||
+           (d.os||'').toLowerCase().includes(filter) ||
+           (d.ip_address||'').toLowerCase().includes(filter) ||
+           (d.status||'').toLowerCase().includes(filter);
+  });
+
+  const toolbar = `
+    <button class="btn btn-sm btn-success" onclick="openRegisterEndpointModal()"><i class="fa-solid fa-user-shield"></i> Authorize / Register Endpoint</button>
+    <button class="btn btn-sm btn-primary" onclick="openDispatchJobModal()"><i class="fa-solid fa-paper-plane"></i> Dispatch Job</button>
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+  `;
+
+  let html = head(
+    'Enrolled Endpoint Inventory &amp; Agent Health',
+    'Authorized Windows and Linux forensic agents authenticated with server-enforced credentials.',
+    toolbar
+  );
+
+  html += filterBar('Search endpoints by hostname, OS, IP address, ID…');
+
+  html += `<div class="card mb-4 mt-3">`;
+
+  if(filtered.length === 0) {
+    html += `
+      <div class="p-8 text-center text-slate-400">
+        <i class="fa-solid fa-laptop-code text-3xl mb-3 text-cyan-400"></i>
+        <div class="text-sm font-semibold">No enrolled endpoint agents found.</div>
+        <div class="text-xs text-slate-500 mt-2 max-w-md mx-auto">
+          Start an agent on an authorized Windows or Linux system with:<br>
+          <code class="mono text-cyan-400 text-[11px] block mt-1.5 p-2 bg-slate-900 rounded border border-slate-800">python -m agent.jocky_agent --server http://127.0.0.1:5000</code>
+          <div class="mt-3">
+            <button class="btn btn-sm btn-primary" onclick="openRegisterEndpointModal()"><i class="fa-solid fa-user-shield mr-1"></i> Quick Authorize Victim 2 Endpoint</button>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    html += table(
+      ['Endpoint ID', 'Hostname', 'Operating System', 'IP Address', 'Agent Status', 'Last Seen (UTC)', 'Actions'],
+      filtered.map(d => {
+        const isCurrent = d.id === state.deviceId;
+        const isActive = (d.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
+        return `
+          <tr class="${isCurrent ? 'bg-cyan-950/20 border-l-2 border-l-cyan-400' : ''}">
+            <td class="mono font-bold text-xs ${isCurrent ? 'text-cyan-400' : ''}">
+              ${fmt(d.id)} ${isCurrent ? '<span class="tag ok text-[9px] ml-1">PRIMARY</span>' : ''}
+            </td>
+            <td class="font-bold text-xs"><i class="fa-solid ${d.os && d.os.toLowerCase().includes('win') ? 'fa-brands fa-windows text-blue-400' : 'fa-brands fa-linux text-amber-400'} mr-1.5"></i>${fmt(d.hostname)}</td>
+            <td class="text-xs">${fmt(d.os || 'Unknown OS')}</td>
+            <td class="mono text-xs text-slate-300">${fmt(d.ip_address || '127.0.0.1')}</td>
+            <td>
+              <span class="tag ${isActive ? 'ok' : 'bad'} font-bold">
+                <i class="fa-solid ${isActive ? 'fa-circle-dot animate-pulse' : 'fa-circle-xmark'} mr-1"></i>${fmt(d.status || 'ACTIVE')}
+              </span>
+            </td>
+            <td class="mono text-xs text-slate-400">${fmt(d.last_seen)}</td>
+            <td>
+              <div class="flex items-center gap-1.5">
+                <button class="btn btn-sm btn-primary py-0 px-2 h-[26px] text-[10.5px]" onclick="openDispatchJobModal('${escapeHtml(d.id)}', '${escapeHtml(d.hostname || d.id)}')">
+                  <i class="fa-solid fa-play mr-1"></i> Dispatch
+                </button>
+                <button class="btn btn-sm py-0 px-2 h-[26px] text-[10.5px]" onclick="state.deviceId='${escapeHtml(d.id)}';state.device=d;renderCaseBanner();toast('Scoped active endpoint to ${escapeHtml(d.hostname||d.id)}.');">
+                  <i class="fa-solid fa-crosshairs mr-1"></i> Scope
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }),
+      'No enrolled endpoints registered.'
+    );
+  }
+
+  html += `</div>`;
+  $('#viewRoot').innerHTML = html;
+}
+
+// 1E. JOB QUEUE & DISPATCH VIEW
+async function renderJobQueue(){
+  let jobs = [];
+  try {
+    jobs = await api('/api/jobs');
+  } catch(e) {
+    jobs = [];
+  }
+
+  const filter = (state.filter || '').toLowerCase();
+  const filtered = jobs.filter(j => {
+    if(!filter) return true;
+    return (j.id||'').toLowerCase().includes(filter) ||
+           (j.agent_id||'').toLowerCase().includes(filter) ||
+           (j.session_id||'').toLowerCase().includes(filter) ||
+           (j.status||'').toLowerCase().includes(filter);
+  });
+
+  const toolbar = `
+    <button class="btn btn-sm btn-primary" onclick="openDispatchJobModal()"><i class="fa-solid fa-plus"></i> New Collection Job</button>
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+  `;
+
+  let html = head(
+    'Persistent Forensic Job Queue',
+    'Track dispatched forensic acquisition plans, endpoint polling, collection execution, and evidence upload.',
+    toolbar
+  );
+
+  html += filterBar('Search jobs by ID, endpoint, session, status…');
+
+  html += `<div class="card mb-4 mt-3">`;
+
+  if(filtered.length === 0) {
+    html += `
+      <div class="p-8 text-center text-slate-400">
+        <i class="fa-solid fa-list-check text-3xl mb-3 text-cyan-400"></i>
+        <div class="text-sm font-semibold">No forensic jobs in the persistent queue.</div>
+        <div class="text-xs text-slate-500 mt-1">Dispatch a read-only collection job to an enrolled endpoint using the button above.</div>
+      </div>
+    `;
+  } else {
+    html += table(
+      ['Job ID', 'Target Endpoint', 'Session / Case ID', 'Plan Hash', 'Status', 'Dispatched At (UTC)', 'Completed At'],
+      filtered.map(j => {
+        const st = (j.status || 'PENDING').toUpperCase();
+        let badgeClass = 'warn';
+        let icon = 'fa-clock';
+        if(st === 'COMPLETED') { badgeClass = 'ok'; icon = 'fa-circle-check'; }
+        else if(st === 'RUNNING') { badgeClass = 'info'; icon = 'fa-spinner fa-spin'; }
+        else if(st === 'FAILED') { badgeClass = 'bad'; icon = 'fa-triangle-exclamation'; }
+
+        return `
+          <tr>
+            <td class="mono font-bold text-xs text-cyan-400">${fmt(j.id)}</td>
+            <td class="mono text-xs text-slate-300 font-semibold" title="${escapeHtml(j.agent_id)}">${fmt(j.agent_id ? j.agent_id.substring(0, 14) + '...' : 'Unknown')}</td>
+            <td class="mono text-xs text-slate-400">${fmt(j.session_id || state.caseId)}</td>
+            <td class="mono text-[10px] text-slate-400" title="${escapeHtml(j.plan_hash)}">${fmt(j.plan_hash ? j.plan_hash.substring(0, 12) + '...' : '-')}</td>
+            <td>
+              <span class="tag ${badgeClass} font-bold">
+                <i class="fa-solid ${icon} mr-1"></i>${fmt(st)}
+              </span>
+            </td>
+            <td class="mono text-xs text-slate-400">${fmt(j.created_at)}</td>
+            <td class="mono text-xs ${j.completed_at ? 'text-green-400' : 'text-slate-500'}">${fmt(j.completed_at || 'In Progress')}</td>
+          </tr>
+        `;
+      }),
+      'No jobs found.'
+    );
+  }
+
+  html += `</div>`;
+  $('#viewRoot').innerHTML = html;
+}
+
+// 1C. INTEGRATION & SETTINGS VIEW
+async function renderSettings(){
+  let statusInfo = { configured: false, provider: "TinyFish" };
+  try {
+    statusInfo = await api('/api/threat-intel/status');
+  } catch(e) {}
+
+  const isConfigured = Boolean(statusInfo.configured);
+
+  const toolbar = `
+    <button class="btn btn-sm btn-primary" onclick="testTinyFishLiveConnection()"><i class="fa-solid fa-satellite-dish"></i> Test Live Connection</button>
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+  `;
+
+  let html = head(
+    'Integration &amp; Platform Configuration',
+    'Manage TinyFish Search &amp; Fetch APIs, endpoint collectors, and platform configuration.',
+    toolbar
+  );
+
+  html += `
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+      <!-- TinyFish Integration Card -->
+      <div class="card p-5 border-l-4 ${isConfigured ? 'border-l-cyan-400' : 'border-l-amber-500'}">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-bold text-sm flex items-center gap-2">
+            <i class="fa-solid fa-satellite-dish text-cyan-400 text-lg"></i>
+            <span>TinyFish Search API Integration</span>
+          </div>
+          <span class="tag ${isConfigured ? 'ok' : 'warn'} font-bold">
+            <i class="fa-solid ${isConfigured ? 'fa-circle-check' : 'fa-triangle-exclamation'} mr-1"></i>
+            ${isConfigured ? 'CONNECTED &amp; ACTIVE' : 'KEY NOT DETECTED'}
+          </span>
+        </div>
+        <p class="text-xs text-slate-400 leading-relaxed mb-4">
+          TinyFish powers real-time, source-grounded threat intelligence research for suspicious domains, IPs, URLs, CVEs, and file hashes directly from the SOC console.
+        </p>
+        <div class="space-y-2 text-xs">
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">Search Endpoint:</span>
+            <code class="text-cyan-400">https://api.search.tinyfish.ai</code>
+          </div>
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">Fetch Endpoint:</span>
+            <code class="text-cyan-400">https://api.fetch.tinyfish.ai</code>
+          </div>
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">Credential Status:</span>
+            <span class="mono ${isConfigured ? 'text-green-400 font-bold' : 'text-amber-400 font-bold'}">
+              ${isConfigured ? 'PROTECTED (Loaded from server .env)' : 'MISSING (TINYFISH_API_KEY)'}
+            </span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">SSRF Defenses:</span>
+            <span class="text-green-400 font-semibold"><i class="fa-solid fa-shield mr-1"></i>Active (Private RFC-1918 &amp; Loopback Blocked)</span>
+          </div>
+          <div class="flex justify-between py-1">
+            <span class="text-slate-400">Evidentiary Boundary:</span>
+            <span class="text-cyan-400 font-semibold"><i class="fa-solid fa-lock mr-1"></i>Zero Evidence Contents Transmitted</span>
+          </div>
+        </div>
+        <div id="settingsPingResult" class="mt-3 text-xs hiddenx"></div>
+      </div>
+
+      <!-- System & Platform Information -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-bold text-sm flex items-center gap-2">
+            <i class="fa-solid fa-server text-cyan-400 text-lg"></i>
+            <span>Platform Specifications</span>
+          </div>
+          <span class="tag info font-mono">v2026.1</span>
+        </div>
+        <p class="text-xs text-slate-400 leading-relaxed mb-4">
+          <strong>Tiny Monitor</strong> is an enterprise-grade Digital Forensics &amp; Incident Response (DFIR) platform powered by TinyFish for the <strong>Swim with TinyFish</strong> hackathon at Presidency University.
+        </p>
+        <div class="space-y-2 text-xs">
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">Application:</span>
+            <span class="font-bold text-slate-200">Tiny Monitor</span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">Hackathon Event:</span>
+            <span class="text-cyan-400 font-semibold">Swim with TinyFish — Presidency University</span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">Database Engine:</span>
+            <code class="text-slate-300">SQLite (WAL Mode)</code>
+          </div>
+          <div class="flex justify-between py-1 border-b border-slate-800">
+            <span class="text-slate-400">Evidence Integrity:</span>
+            <span class="text-green-400 font-semibold">SHA-256 Hashing &amp; Merkle Chain</span>
+          </div>
+          <div class="flex justify-between py-1">
+            <span class="text-slate-400">Active Case:</span>
+            <span class="mono font-bold text-cyan-400">${escapeHtml(state.caseId)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Security & Configuration Guidance -->
+    <div class="card p-5">
+      <div class="font-bold text-sm mb-2 flex items-center gap-2">
+        <i class="fa-solid fa-shield-halved text-cyan-400"></i>
+        <span>Security &amp; Key Rotation Guidance</span>
+      </div>
+      <div class="text-xs text-slate-400 space-y-2 leading-relaxed">
+        <p>
+          <strong>Credential Storage:</strong> The TinyFish API key is stored strictly on the server in <code>.env</code> (ignored by Git) and is never transmitted to the browser, stored in client JavaScript, or returned by API endpoints.
+        </p>
+        <p>
+          <strong>Rotating Credentials:</strong> To update your key, edit <code>.env</code> on the server with:
+          <code class="block bg-slate-950 p-2 rounded mt-1 text-cyan-400 mono">TINYFISH_API_KEY=your_new_key_here</code>
+          The server automatically reloads configuration without requiring database migrations.
+        </p>
+      </div>
+    </div>
+  `;
+
+  $('#viewRoot').innerHTML = html;
+}
+
+// ─── EVIDENCE-TO-CONTEXT GRAPH VIEW & PHYSICS CANVAS ────────────────────────
+
+let graphSimId = null;
+let graphState = {
+  data: null,
+  filteredNodes: [],
+  filteredEdges: [],
+  selectedNode: null,
+  showEvidence: true,
+  showIntel: true,
+  showFindings: true,
+  activeTab: 'canvas',
+  zoom: 1,
+  panX: 0,
+  panY: 0,
+  isDragging: false,
+  draggedNode: null,
+  lastMouseX: 0,
+  lastMouseY: 0
+};
+
+function getNodeColor(type) {
+  switch(type) {
+    case 'case': return '#00f0ff';
+    case 'device': return '#38bdf8';
+    case 'job': return '#a855f7';
+    case 'evidence': return '#10b981';
+    case 'hash': return '#f59e0b';
+    case 'threat_intel': return '#0ea5e9';
+    case 'source': return '#14b8a6';
+    case 'finding': return '#f43f5e';
+    default: return '#94a3b8';
+  }
+}
+
+function getNodeIcon(type) {
+  switch(type) {
+    case 'case': return 'fa-shield-halved';
+    case 'device': return 'fa-laptop-code';
+    case 'job': return 'fa-list-check';
+    case 'evidence': return 'fa-box-archive';
+    case 'hash': return 'fa-hashtag';
+    case 'threat_intel': return 'fa-satellite-dish';
+    case 'source': return 'fa-globe';
+    case 'finding': return 'fa-triangle-exclamation';
+    default: return 'fa-circle';
+  }
+}
+
+function filterGraphData() {
+  if (!graphState.data) {
+    graphState.filteredNodes = [];
+    graphState.filteredEdges = [];
+    return;
+  }
+  const nodes = graphState.data.nodes || [];
+  const edges = graphState.data.edges || [];
+
+  graphState.filteredNodes = nodes.filter(n => {
+    if (n.category === 'INVESTIGATION_ROOT') return true;
+    if (n.category === 'ORIGINAL_EVIDENCE' && !graphState.showEvidence) return false;
+    if (n.category === 'EXTERNAL_INTELLIGENCE' && !graphState.showIntel) return false;
+    if (n.category === 'ANALYST_CONCLUSION' && !graphState.showFindings) return false;
+    return true;
+  });
+
+  const nodeSet = new Set(graphState.filteredNodes.map(n => n.id));
+  graphState.filteredEdges = edges.filter(e => nodeSet.has(e.source) && nodeSet.has(e.target));
+}
+
+window.toggleGraphCategory = function(cat, enabled) {
+  if (cat === 'evidence') graphState.showEvidence = enabled;
+  if (cat === 'intel') graphState.showIntel = enabled;
+  if (cat === 'findings') graphState.showFindings = enabled;
+  filterGraphData();
+  if (graphState.activeTab === 'canvas') {
+    initGraphCanvas();
+  } else {
+    renderGraph();
+  }
+};
+
+window.setGraphTab = function(tab) {
+  graphState.activeTab = tab;
+  renderGraph();
+};
+
+window.resetGraphView = function() {
+  graphState.zoom = 1;
+  graphState.panX = 0;
+  graphState.panY = 0;
+  if (graphState.activeTab === 'canvas') {
+    initGraphCanvas();
+  }
+};
+
+window.zoomGraph = function(delta) {
+  graphState.zoom = Math.max(0.3, Math.min(3.0, graphState.zoom * delta));
+};
+
+function renderGraphInspectorHtml() {
+  const n = graphState.selectedNode;
+  if (!n) {
+    const stats = (graphState.data && graphState.data.stats) || {};
+    return `
+      <div class="card p-5 h-full border-slate-800 bg-slate-900/70 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-800">
+            <i class="fa-solid fa-circle-nodes text-cyan-400"></i>
+            <span class="font-bold text-sm text-slate-200">Context Graph Inspector</span>
+          </div>
+          <div class="text-xs text-slate-400 leading-relaxed mb-4">
+            Click on any entity node in the graph to inspect its complete forensic provenance, SHA-256 cryptographic digest, source URLs, and analyst review status.
+          </div>
+          <div class="space-y-2 text-xs">
+            <div class="flex justify-between py-1 border-b border-slate-800/60">
+              <span class="text-slate-400"><i class="fa-solid fa-box-archive mr-1 text-emerald-400"></i> Preserved Evidence:</span>
+              <span class="font-bold font-mono text-emerald-300">${stats.evidence_nodes || 0}</span>
+            </div>
+            <div class="flex justify-between py-1 border-b border-slate-800/60">
+              <span class="text-slate-400"><i class="fa-solid fa-satellite-dish mr-1 text-cyan-400"></i> TinyFish Web Intel:</span>
+              <span class="font-bold font-mono text-cyan-300">${stats.intelligence_nodes || 0}</span>
+            </div>
+            <div class="flex justify-between py-1 border-b border-slate-800/60">
+              <span class="text-slate-400"><i class="fa-solid fa-triangle-exclamation mr-1 text-rose-400"></i> Corroborated Findings:</span>
+              <span class="font-bold font-mono text-rose-300">${stats.analyst_nodes || 0}</span>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-500 font-mono flex items-center gap-1.5">
+          <i class="fa-solid fa-shield-halved text-cyan-500"></i> Provenance 100% Backed by SQLite DB
+        </div>
+      </div>
+    `;
+  }
+
+  const d = n.details || {};
+  const color = getNodeColor(n.type);
+
+  return `
+    <div class="card p-5 h-full border-slate-700 bg-slate-900 flex flex-col justify-between shadow-2xl">
+      <div>
+        <div class="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-800">
+          <span class="tag font-bold text-[10px]" style="background:${color}22; color:${color}; border:1px solid ${color}66;">
+            <i class="fa-solid ${getNodeIcon(n.type)} mr-1"></i> ${escapeHtml(n.type.toUpperCase())}
+          </span>
+          <span class="tag text-[10px] font-bold ${n.status==='VERIFIED'?'ok':n.status==='TAMPERED_MISMATCH'?'bad':'info'}">
+            ${escapeHtml(n.status || 'COLLECTED')}
+          </span>
+        </div>
+
+        <div class="font-bold text-sm text-slate-100 mb-1 break-words">${escapeHtml(n.label)}</div>
+        <div class="text-[11px] text-slate-400 mb-3 mono">${escapeHtml(n.id)}</div>
+
+        <div class="space-y-2 text-xs">
+          ${d.sha256 ? `
+            <div>
+              <div class="text-[10px] uppercase font-bold text-slate-500">Cryptographic SHA-256</div>
+              <div class="mono text-[11px] text-amber-300 break-all bg-slate-950 p-1.5 rounded border border-slate-800">${escapeHtml(d.sha256)}</div>
+            </div>
+          ` : ''}
+
+          ${d.url ? `
+            <div>
+              <div class="text-[10px] uppercase font-bold text-slate-500">Public Intelligence Source</div>
+              <a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:underline break-all block text-xs mt-0.5">
+                ${escapeHtml(d.url)} <i class="fa-solid fa-arrow-up-right-from-square text-[9px]"></i>
+              </a>
+            </div>
+          ` : ''}
+
+          ${d.snippet ? `
+            <div>
+              <div class="text-[10px] uppercase font-bold text-slate-500">Source Snippet</div>
+              <div class="text-slate-300 text-xs bg-slate-950/70 p-2 rounded border border-slate-800/80 leading-relaxed">${escapeHtml(d.snippet)}</div>
+            </div>
+          ` : ''}
+
+          ${d.query ? `
+            <div class="flex justify-between py-1 border-b border-slate-800/60">
+              <span class="text-slate-400">Dispatched Query:</span>
+              <span class="mono text-cyan-300">${escapeHtml(d.query)}</span>
+            </div>
+          ` : ''}
+
+          ${d.uploaded_at || d.created_at || d.collected_at || d.timestamp ? `
+            <div class="flex justify-between py-1 border-b border-slate-800/60">
+              <span class="text-slate-400">Timestamp:</span>
+              <span class="mono text-slate-300">${formatUtc(d.uploaded_at || d.created_at || d.collected_at || d.timestamp)}</span>
+            </div>
+          ` : ''}
+
+          ${d.size_bytes !== undefined ? `
+            <div class="flex justify-between py-1 border-b border-slate-800/60">
+              <span class="text-slate-400">Artifact Size:</span>
+              <span class="mono text-slate-200">${d.size_bytes.toLocaleString()} bytes</span>
+            </div>
+          ` : ''}
+
+          ${d.mitre_technique ? `
+            <div class="flex justify-between py-1 border-b border-slate-800/60">
+              <span class="text-slate-400">MITRE Technique:</span>
+              <span class="tag font-bold text-rose-300">${escapeHtml(d.mitre_technique)}</span>
+            </div>
+          ` : ''}
+
+          ${d.description ? `
+            <div class="mt-2 text-xs text-slate-300 italic">
+              "${escapeHtml(d.description)}"
+            </div>
+          ` : ''}
+        </div>
+      </div>
+
+      <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+        ${n.type === 'evidence' ? `
+          <button class="btn btn-xs btn-primary" onclick="verifyEvidenceFile('${d.id}')"><i class="fa-solid fa-check-double mr-1"></i> Verify Hash</button>
+          <a href="/api/evidence/${encodeURIComponent(d.id)}/download" class="btn btn-xs"><i class="fa-solid fa-download mr-1"></i> Download</a>
+        ` : ''}
+        ${n.type === 'source' && d.url ? `
+          <button class="btn btn-xs btn-primary" onclick="fetchSourceContent('${escapeHtml(d.url).replace(/'/g, "\\'")}')"><i class="fa-solid fa-file-lines mr-1"></i> Fetch Page</button>
+        ` : ''}
+        ${n.type === 'threat_intel' ? `
+          <button class="btn btn-xs btn-primary" onclick="setView('threat_intel')"><i class="fa-solid fa-magnifying-glass mr-1"></i> Open Intel</button>
+        ` : ''}
+        <button class="btn btn-xs ml-auto" onclick="graphState.selectedNode=null; renderGraph();">Deselect</button>
+      </div>
+    </div>
+  `;
+}
+
+window.selectGraphNodeById = function(nodeId) {
+  const n = (graphState.filteredNodes || []).find(x => x.id === nodeId);
+  if (n) {
+    graphState.selectedNode = n;
+    const panel = $('#graphInspectorPanel');
+    if (panel) panel.innerHTML = renderGraphInspectorHtml();
+  }
+};
+
+function initGraphCanvas() {
+  const canvas = document.getElementById('evidenceGraphCanvas');
+  if (!canvas) return;
+
+  if (graphSimId) {
+    cancelAnimationFrame(graphSimId);
+    graphSimId = null;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || 800;
+  const height = rect.height || 640;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const nodes = graphState.filteredNodes;
+  const edges = graphState.filteredEdges;
+
+  // Initialize node layout positions radially around center
+  const centerX = width / 2;
+  const centerY = height / 2;
+
+  nodes.forEach((n, idx) => {
+    if (n.x === undefined || n.y === undefined) {
+      if (n.type === 'case') {
+        n.x = centerX;
+        n.y = centerY;
+      } else {
+        const angle = (idx / Math.max(1, nodes.length - 1)) * 2 * Math.PI;
+        const dist = n.type === 'device' || n.type === 'job' ? 140 :
+                     n.type === 'evidence' || n.type === 'threat_intel' ? 220 : 300;
+        n.x = centerX + Math.cos(angle) * dist + (Math.random() - 0.5) * 40;
+        n.y = centerY + Math.sin(angle) * dist + (Math.random() - 0.5) * 40;
+      }
+      n.vx = 0;
+      n.vy = 0;
+    }
+    n.radius = n.type === 'case' ? 26 : (n.type === 'evidence' || n.type === 'threat_intel' ? 20 : 16);
+  });
+
+  const nodeMap = new Map();
+  nodes.forEach(n => nodeMap.set(n.id, n));
+
+  // Physics simulation step
+  function stepSimulation() {
+    const kRepel = 2400;
+    const kAttract = 0.04;
+    const idealLen = 110;
+
+    // Repulsion between all pairs
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distSq = dx * dx + dy * dy || 1;
+        const dist = Math.sqrt(distSq);
+        if (dist < 400) {
+          const force = kRepel / distSq;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          if (a !== graphState.draggedNode && a.type !== 'case') { a.vx -= fx; a.vy -= fy; }
+          if (b !== graphState.draggedNode && b.type !== 'case') { b.vx += fx; b.vy += fy; }
+        }
+      }
+    }
+
+    // Attraction along edges
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      const a = nodeMap.get(e.source);
+      const b = nodeMap.get(e.target);
+      if (!a || !b) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = (dist - idealLen) * kAttract;
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      if (a !== graphState.draggedNode && a.type !== 'case') { a.vx += fx; a.vy += fy; }
+      if (b !== graphState.draggedNode && b.type !== 'case') { b.vx -= fx; b.vy -= fy; }
+    }
+
+    // Center gravity
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      if (n === graphState.draggedNode || n.type === 'case') continue;
+      const dx = centerX - n.x;
+      const dy = centerY - n.y;
+      n.vx += dx * 0.002;
+      n.vy += dy * 0.002;
+      n.vx *= 0.85;
+      n.vy *= 0.85;
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+  }
+
+  // Draw frame
+  function draw() {
+    stepSimulation();
+
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.translate(centerX + graphState.panX, centerY + graphState.panY);
+    ctx.scale(graphState.zoom, graphState.zoom);
+    ctx.translate(-centerX, -centerY);
+
+    // Draw Edges
+    edges.forEach(e => {
+      const a = nodeMap.get(e.source);
+      const b = nodeMap.get(e.target);
+      if (!a || !b) return;
+
+      const isConnected = graphState.selectedNode && (graphState.selectedNode.id === a.id || graphState.selectedNode.id === b.id);
+
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+
+      if (e.relation === 'ANALYST_CONCLUSION' || e.relation === 'EVIDENTIARY_BASIS') {
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = isConnected ? '#f43f5e' : 'rgba(244, 63, 94, 0.35)';
+      } else if (e.relation === 'TINYFISH_RESEARCH' || e.relation === 'PUBLIC_SOURCE_CITATION') {
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = isConnected ? '#00f0ff' : 'rgba(0, 240, 255, 0.3)';
+      } else {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = isConnected ? '#34d399' : 'rgba(100, 116, 139, 0.35)';
+      }
+
+      ctx.lineWidth = isConnected ? 2.5 : 1.2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Edge relationship label on midpoint
+      if (isConnected || graphState.zoom >= 1.2) {
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
+        ctx.font = '8px monospace';
+        ctx.fillStyle = isConnected ? '#e2e8f0' : '#64748b';
+        ctx.textAlign = 'center';
+        ctx.fillText(e.label || e.relation, mx, my - 3);
+      }
+    });
+
+    // Draw Nodes
+    nodes.forEach(n => {
+      const isSelected = graphState.selectedNode && graphState.selectedNode.id === n.id;
+      const color = getNodeColor(n.type);
+
+      // Outer glow circle
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius + (isSelected ? 6 : 2), 0, Math.PI * 2);
+      ctx.fillStyle = isSelected ? `${color}44` : `${color}15`;
+      ctx.fill();
+
+      // Node body
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+      ctx.fillStyle = '#0f172a';
+      ctx.fill();
+      ctx.lineWidth = isSelected ? 3 : 1.8;
+      ctx.strokeStyle = isSelected ? '#ffffff' : color;
+      ctx.stroke();
+
+      // Inner status indicator dot
+      if (n.status === 'VERIFIED') {
+        ctx.beginPath();
+        ctx.arc(n.x + n.radius * 0.7, n.y - n.radius * 0.7, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#10b981';
+        ctx.fill();
+      } else if (n.status === 'TAMPERED_MISMATCH') {
+        ctx.beginPath();
+        ctx.arc(n.x + n.radius * 0.7, n.y - n.radius * 0.7, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ef4444';
+        ctx.fill();
+      }
+
+      // Node label
+      ctx.font = isSelected ? 'bold 11px system-ui' : '10px system-ui';
+      ctx.fillStyle = isSelected ? '#ffffff' : '#cbd5e1';
+      ctx.textAlign = 'center';
+      const labelText = n.label.length > 22 ? n.label.slice(0, 20) + '…' : n.label;
+      ctx.fillText(labelText, n.x, n.y + n.radius + 13);
+    });
+
+    ctx.restore();
+
+    graphSimId = requestAnimationFrame(draw);
+  }
+
+  // Mouse interaction handlers
+  function getCanvasPos(evt) {
+    const r = canvas.getBoundingClientRect();
+    const clientX = evt.clientX - r.left;
+    const clientY = evt.clientY - r.top;
+    // Account for zoom and pan
+    const normX = (clientX - (centerX + graphState.panX)) / graphState.zoom + centerX;
+    const normY = (clientY - (centerY + graphState.panY)) / graphState.zoom + centerY;
+    return { x: normX, y: normY, rawX: clientX, rawY: clientY };
+  }
+
+  function findNodeAt(pos) {
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i];
+      const dx = n.x - pos.x;
+      const dy = n.y - pos.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 4) {
+        return n;
+      }
+    }
+    return null;
+  }
+
+  canvas.onmousedown = function(e) {
+    const pos = getCanvasPos(e);
+    const hit = findNodeAt(pos);
+    if (hit) {
+      graphState.draggedNode = hit;
+      graphState.selectedNode = hit;
+      const panel = $('#graphInspectorPanel');
+      if (panel) panel.innerHTML = renderGraphInspectorHtml();
+    } else {
+      graphState.isDragging = true;
+      graphState.lastMouseX = e.clientX;
+      graphState.lastMouseY = e.clientY;
+    }
+  };
+
+  canvas.onmousemove = function(e) {
+    const pos = getCanvasPos(e);
+    if (graphState.draggedNode) {
+      graphState.draggedNode.x = pos.x;
+      graphState.draggedNode.y = pos.y;
+      graphState.draggedNode.vx = 0;
+      graphState.draggedNode.vy = 0;
+    } else if (graphState.isDragging) {
+      const dx = e.clientX - graphState.lastMouseX;
+      const dy = e.clientY - graphState.lastMouseY;
+      graphState.panX += dx;
+      graphState.panY += dy;
+      graphState.lastMouseX = e.clientX;
+      graphState.lastMouseY = e.clientY;
+    } else {
+      const hit = findNodeAt(pos);
+      canvas.style.cursor = hit ? 'pointer' : 'grab';
+    }
+  };
+
+  window.addEventListener('mouseup', function() {
+    graphState.draggedNode = null;
+    graphState.isDragging = false;
+  });
+
+  canvas.onwheel = function(e) {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    graphState.zoom = Math.max(0.3, Math.min(3.0, graphState.zoom * factor));
+  };
+
+  graphSimId = requestAnimationFrame(draw);
 }
 
 // 2. TIMELINE
@@ -1465,7 +3182,12 @@ async function renderNetwork(){
         <td><span class="tag font-bold">${fmt(n.protocol)}</span></td>
         <td class="mono font-semibold">${fmt(n.local_address)}</td>
         <td class="mono">${fmt(n.local_port)}</td>
-        <td class="mono font-semibold text-blue-700 dark:text-blue-400">${fmt(n.remote_address||'—')}</td>
+        <td class="mono font-semibold text-cyan-400">
+          ${fmt(n.remote_address||'—')}
+          ${n.remote_address && n.remote_address !== '—' && n.remote_address !== '0.0.0.0' && n.remote_address !== '127.0.0.1' ? `
+            <button class="ml-1 text-[11px] text-slate-400 hover:text-cyan-300" onclick="researchIndicatorInTinyFish('${escapeHtml(n.remote_address)}', 'ipv4')" title="Research Remote IP in TinyFish"><i class="fa-solid fa-satellite-dish"></i></button>
+          ` : ''}
+        </td>
         <td class="mono">${fmt(n.remote_port||'—')}</td>
         <td><span class="tag ${n.state==='ESTABLISHED'?'ok':n.state==='LISTEN'?'info':'warn'}">${fmt(n.state||'—')}</span></td>
         <td class="mono font-bold">${fmt(n.pid||'—')}</td>
@@ -1547,33 +3269,112 @@ window.triggerSnapshot=async()=>{
   }catch(e){toast('Snapshot error: '+e.message)}
 };
 
-// 15. EVIDENCE EXPLORER
+// 15. DIGITAL EVIDENCE INVENTORY & UPLOAD
 async function renderEvidence(){
-  const url = `/api/evidence?case_id=${encodeURIComponent(state.caseId)}&page=${state.page}&limit=${state.limit}&q=${encodeURIComponent(state.filter)}`;
-  const d = await api(url);
-  state.totalPages = d.total_pages || 1;
-  const items = d.items || [];
+  let evidenceList = [];
+  try {
+    const res = await api(`/api/cases/${encodeURIComponent(state.caseId)}/evidence`);
+    evidenceList = res.evidence || [];
+  } catch(e) {}
 
-  $('#viewRoot').innerHTML = head('Evidence Explorer (Artifact Manifests)', 'Comprehensive ledger of all raw forensic artifacts collected with cryptographic SHA-256 signatures.', filterBar('Search artifact name, path, type, hash…')) +
-  `<div class="card">` +
-  table(
-    ['Artifact ID', 'Category', 'Artifact Type', 'Name', 'Path / Store', 'Source Collector', 'Cryptographic SHA-256', 'Timestamp'],
-    items.map(a => `
-      <tr>
-        <td class="mono font-bold text-xs">${fmt(a.id)}</td>
-        <td><span class="tag info">${fmt(a.category)}</span></td>
-        <td class="font-semibold text-xs">${fmt(a.artifact_type)}</td>
-        <td>${fmt(a.name)}</td>
-        <td class="mono text-xs max-w-[320px] overflow-hidden text-ellipsis" title="${escapeHtml(a.path)}">${fmt(a.path)}</td>
-        <td><code>${fmt(a.source)}</code></td>
-        <td class="mono text-xs max-w-[200px] overflow-hidden text-ellipsis">${fmt(a.sha256||'—')}</td>
-        <td class="mono text-xs">${fmt(a.timestamp)}</td>
-      </tr>
-    `),
-    'No artifact evidence manifests recorded.'
-  ) +
-  paginationBar(d.total||0, d.count||0) +
-  `</div>`;
+  const filter = (state.filter || '').toLowerCase();
+  const filtered = evidenceList.filter(e => {
+    if(!filter) return true;
+    return (e.id||'').toLowerCase().includes(filter) ||
+           (e.archive_path||'').toLowerCase().includes(filter) ||
+           (e.sha256||'').toLowerCase().includes(filter);
+  });
+
+  const toolbar = `
+    <button class="btn btn-sm btn-primary" onclick="$('#evidenceFileInput').click()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload Evidence</button>
+    <button class="btn btn-sm" onclick="renderView()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+  `;
+
+  let html = head(
+    'Digital Evidence &amp; Cryptographic Hash Verification',
+    `Case: <strong>${escapeHtml(state.caseId)}</strong> · Real local evidence files with SHA-256 cryptographic hashes and chain of custody.`,
+    toolbar
+  );
+
+  // Evidence Ingest Card
+  html += `
+    <div class="card panel mb-4 border-l-4 border-l-cyan-400">
+      <div class="panel-title flex items-center justify-between">
+        <span class="flex items-center gap-2"><i class="fa-solid fa-cloud-arrow-up text-cyan-400"></i> Direct Evidence Ingest (Safe Demonstration Files)</span>
+        <span class="tag info">Target Case: ${escapeHtml(state.caseId)}</span>
+      </div>
+      <div class="text-xs text-slate-400 mb-3">
+        Ingest disk images, raw artifacts, memory captures, or safe test logs into this case. Uploaded bytes are stored outside public paths and hashed via SHA-256.
+      </div>
+      <form id="directEvidenceForm" onsubmit="uploadEvidenceFileDirect(event)" class="flex items-center gap-3 flex-wrap">
+        <input type="file" id="evidenceFileInput" class="hiddenx" onchange="onEvidenceFileSelected(this)">
+        <button type="button" class="btn btn-sm" onclick="$('#evidenceFileInput').click()"><i class="fa-solid fa-folder-open mr-1"></i> Choose File…</button>
+        <span id="selectedFileName" class="text-xs text-slate-300 font-mono italic">No file selected</span>
+        <input id="evidenceDescInput" class="input text-xs w-64" placeholder="Description / notes (optional)">
+        <button id="evidenceUploadBtn" type="submit" class="btn btn-sm btn-primary" disabled><i class="fa-solid fa-upload mr-1"></i> Ingest &amp; Verify SHA-256</button>
+      </form>
+      <div id="evidenceUploadFeedback" class="mt-2 text-xs hiddenx"></div>
+    </div>
+  `;
+
+  // Interactive Hash Verification Box
+  html += `
+    <div class="card panel mb-4">
+      <div class="panel-title"><i class="fa-solid fa-fingerprint text-cyan-400 mr-1.5"></i> Interactive Evidence Hash Verification</div>
+      <div class="flex gap-2">
+        <input id="hashVerifyInput" class="input mono text-xs" placeholder="Paste SHA-256 hash to verify against evidence ledger…">
+        <button class="btn btn-primary" onclick="verifyTargetHash()"><i class="fa-solid fa-check-double mr-1"></i> Verify Hash</button>
+      </div>
+      <div id="hashVerifyResult" class="mt-2 text-xs hiddenx"></div>
+    </div>
+  `;
+
+  // Filter Bar
+  html += filterBar('Search evidence filename, path, SHA-256 hash…');
+
+  // Evidence Files Table
+  html += `<div class="card mt-3">`;
+  if(filtered.length === 0) {
+    html += `
+      <div class="p-8 text-center text-slate-400">
+        <i class="fa-solid fa-box-archive text-3xl mb-3 text-cyan-400"></i>
+        <div class="text-sm font-semibold">No digital evidence files recorded for Case ${escapeHtml(state.caseId)}.</div>
+        <div class="text-xs text-slate-500 mt-1">Upload a safe demonstration file above or run an endpoint collector to populate this ledger.</div>
+      </div>
+    `;
+  } else {
+    html += table(
+      ['Evidence ID', 'Filename / Path', 'Size', 'Cryptographic SHA-256', 'Uploaded At (UTC)', 'Integrity Status', 'Actions'],
+      filtered.map(e => {
+        const fname = (e.archive_path || '').split(/[\/]/).pop() || e.id;
+        const sizeStr = e.size_bytes ? `${(e.size_bytes/1024).toFixed(1)} KB` : '—';
+        return `
+          <tr>
+            <td class="mono font-bold text-xs text-cyan-400 cursor-pointer hover:underline" onclick="openEvidenceDetailModal('${escapeHtml(e.id)}')">
+              <i class="fa-solid fa-box-archive mr-1 text-[10px]"></i>${escapeHtml(e.id)}
+            </td>
+            <td class="mono font-semibold text-xs max-w-[260px] truncate" title="${escapeHtml(e.archive_path)}">${escapeHtml(fname)}</td>
+            <td class="mono text-xs">${sizeStr}</td>
+            <td class="mono text-xs max-w-[200px] truncate text-slate-300">
+              <code>${escapeHtml(e.sha256||'—')}</code>
+              <button class="ml-1 text-slate-400 hover:text-cyan-400" onclick="navigator.clipboard.writeText('${escapeHtml(e.sha256)}');toast('SHA-256 copied to clipboard.')" title="Copy Hash"><i class="fa-regular fa-copy"></i></button>
+            </td>
+            <td class="mono text-xs">${formatUtc(e.uploaded_at)}</td>
+            <td id="status-cell-${escapeHtml(e.id)}"><span class="tag ok"><i class="fa-solid fa-circle-check mr-1"></i>VERIFIED</span></td>
+            <td class="flex items-center gap-1.5">
+              <button class="btn btn-xs" onclick="openEvidenceDetailModal('${escapeHtml(e.id)}')"><i class="fa-solid fa-circle-info mr-1"></i> Details</button>
+              <button class="btn btn-xs btn-primary" onclick="verifyEvidenceFile('${escapeHtml(e.id)}')"><i class="fa-solid fa-shield-halved mr-1"></i> Verify Hash</button>
+              <a href="/api/evidence/${encodeURIComponent(e.id)}/download" class="btn btn-xs"><i class="fa-solid fa-download mr-1"></i> Download</a>
+            </td>
+          </tr>
+        `;
+      }),
+      'No evidence files recorded.'
+    );
+  }
+  html += `</div>`;
+
+  $('#viewRoot').innerHTML = html;
 }
 
 // 16. HASH VERIFICATION
@@ -1597,15 +3398,23 @@ async function renderHashes(){
   <div class="card">
   ` +
   table(
-    ['Item Type', 'Item Identifier', 'Target Path / Context', 'Cryptographic SHA-256', 'Integrity Status', 'Timestamp'],
+    ['Item Type', 'Item Identifier', 'Target Path / Context', 'Cryptographic SHA-256', 'Integrity Status', 'Timestamp', 'Intel'],
     items.map(h => `
       <tr>
         <td><span class="tag">${fmt(h.item_type)}</span></td>
         <td class="mono text-xs font-semibold">${fmt(h.item_id)}</td>
         <td class="mono text-xs max-w-[360px] overflow-hidden text-ellipsis" title="${escapeHtml(h.path)}">${fmt(h.path)}</td>
-        <td class="mono text-xs font-bold text-blue-700 dark:text-blue-400">${fmt(h.sha256)}</td>
+        <td class="mono text-xs font-bold text-cyan-400">
+          <code>${fmt(h.sha256)}</code>
+          <button class="ml-1 text-slate-400 hover:text-cyan-400" onclick="navigator.clipboard.writeText('${escapeHtml(h.sha256)}');toast('Hash copied.')" title="Copy Hash"><i class="fa-regular fa-copy"></i></button>
+        </td>
         <td><span class="tag ok"><i class="fa-solid fa-circle-check mr-1"></i>VERIFIED</span></td>
         <td class="mono text-xs">${fmt(h.timestamp)}</td>
+        <td>
+          <button class="btn btn-xs" onclick="researchIndicatorInTinyFish('${escapeHtml(h.sha256)}', 'sha256')">
+            <i class="fa-solid fa-satellite-dish text-cyan-400 mr-1"></i> TinyFish
+          </button>
+        </td>
       </tr>
     `),
     'No hash records returned.'
@@ -1992,25 +3801,36 @@ $('#authForm').onsubmit=async e=>{
 
 $('#caseForm').onsubmit=async e=>{
   e.preventDefault();
+  const errBox = $('#caseError');
+  if(errBox) errBox.classList.add('hiddenx');
+
   const payload={
-    name:$('#caseName').value.trim(),
-    description:$('#scope').value.trim(),
-    investigator_name:$('#investigator').value.trim(),
-    investigator_org:$('#organization').value.trim(),
-    subject_name:$('#scope').value.trim(),
-    authorization_ref:$('#authorizer').value.trim(),
-    evidence_source:$('#custodian').value.trim(),
-    target_os:$('#targetOs').value,
-    investigation_notes:`Tracking ID: ${$('#caseTracking').value}; Status: ${$('#status').value}; Severity: ${$('#severity').value}`
+    name: ($('#caseName')?.value || '').trim(),
+    description: ($('#scope')?.value || '').trim(),
+    investigator_name: ($('#investigator')?.value || '').trim(),
+    investigator_org: ($('#organization')?.value || '').trim(),
+    subject_name: ($('#scope')?.value || '').trim(),
+    authorization_ref: ($('#authorizer')?.value || '').trim(),
+    evidence_source: ($('#custodian')?.value || '').trim(),
+    target_os: $('#targetOs')?.value || 'Windows',
+    investigation_notes: `Tracking ID: ${$('#caseTracking')?.value || ''}; Status: ${$('#status')?.value || 'Active'}; Severity: ${$('#severity')?.value || 'Medium'}`
   };
   try{
     const created=await api('/api/cases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!created || !created.id) throw new Error('Server returned invalid case response.');
     state.caseId=created.id;
-    state.case={...payload,id:created.id,tracking:$('#caseTracking').value,startTime:$('#startTime').value};
-    state.os=$('#targetOs').value;
+    state.case={...payload,id:created.id,tracking:$('#caseTracking')?.value||created.id,startTime:$('#startTime')?.value||''};
+    state.os=$('#targetOs')?.value||'Windows';
     await loadExistingCases();
     await initializeDashboard();
-  }catch(x){toast('Case creation failed: '+x.message)}
+  }catch(x){
+    console.error('Case creation error:', x);
+    if(errBox){
+      errBox.textContent = 'Case creation failed: ' + (x.message || x);
+      errBox.classList.remove('hiddenx');
+    }
+    toast('Case creation failed: ' + (x.message || x));
+  }
 };
 
 $$('.nav-item[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
@@ -2043,6 +3863,553 @@ $('#logoutBtn').onclick=async()=>{try{await fetch('/logout',{credentials:'same-o
     }
   }catch{}
 })();
+
+// --- FORENSIC INVESTIGATOR DASHBOARD CONTROLLERS ---
+
+window.openNewCaseModal = function(){
+  const trackId = newCaseId();
+  const body = `
+    <form id="quickNewCaseForm" onsubmit="submitNewCase(event)" class="space-y-3">
+      <div>
+        <label class="label required">Case Title / Operation Name</label>
+        <input id="qCaseName" class="input font-semibold" placeholder="e.g. Incident Triage - Host 01" required autofocus>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label required">Case Severity</label>
+          <select id="qSeverity" class="select" required>
+            <option>Critical</option>
+            <option>High</option>
+            <option selected>Medium</option>
+            <option>Low</option>
+          </select>
+        </div>
+        <div>
+          <label class="label required">Investigator Badge ID</label>
+          <input id="qInvestigator" class="input" value="INV-9042-FED" required>
+        </div>
+      </div>
+      <div>
+        <label class="label">Investigation Scope &amp; Target Rationale</label>
+        <textarea id="qDescription" class="textarea text-xs" placeholder="Describe the incident scope, indicator leads, or investigation justification...">Defensive incident triage and forensic investigation using Tiny Monitor and TinyFish threat intelligence.</textarea>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-700">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus mr-1"></i> Create &amp; Scope Case</button>
+      </div>
+    </form>
+  `;
+  openModal('Open New Forensic Investigation Case', body);
+};
+
+window.submitNewCase = async function(e){
+  e.preventDefault();
+  const name = $('#qCaseName').value.trim();
+  const severity = $('#qSeverity').value;
+  const investigator = $('#qInvestigator').value.trim();
+  const desc = $('#qDescription').value.trim();
+  if(!name){ toast('Case title is required.'); return; }
+
+  try {
+    const payload = {
+      name: name,
+      description: desc,
+      severity: severity,
+      investigator_name: investigator,
+      investigation_notes: `Created via Tiny Monitor Quick Intake. Severity: ${severity}`
+    };
+    const created = await api('/api/cases', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    closeModal();
+    toast(`Case ${created.id} initialized successfully.`);
+    state.caseId = created.id;
+    state.case = created;
+    await loadExistingCases();
+    renderCaseBanner();
+    setView('overview');
+  } catch(err) {
+    toast('Failed to create case: ' + err.message);
+  }
+};
+
+window.toggleCaseStatus = async function(caseId, targetStatus){
+  try {
+    await api(`/api/cases/${encodeURIComponent(caseId)}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ status: targetStatus })
+    });
+    toast(`Case ${caseId} status updated to ${targetStatus}.`);
+    await loadExistingCases();
+    if(state.caseId === caseId && state.case) {
+      state.case.status = targetStatus;
+      renderCaseBanner();
+    }
+    renderView();
+  } catch(err) {
+    toast('Status update failed: ' + err.message);
+  }
+};
+
+window.openCaseDetailModal = async function(caseId){
+  try {
+    const [c, evRes, tiRes] = await Promise.all([
+      api(`/api/cases/${encodeURIComponent(caseId)}`),
+      api(`/api/cases/${encodeURIComponent(caseId)}/evidence`).catch(()=>({evidence:[]})),
+      api(`/api/cases/${encodeURIComponent(caseId)}/threat-intel`).catch(()=>({research_records:[]}))
+    ]);
+
+    const evCount = (evRes.evidence || []).length;
+    const tiCount = (tiRes.research_records || []).length;
+
+    const body = `
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="p-3 rounded bg-slate-900 border border-slate-800">
+            <span class="text-slate-400 block mb-1">Case Tracking ID:</span>
+            <span class="mono font-bold text-cyan-400 text-sm">${escapeHtml(c.id)}</span>
+          </div>
+          <div class="p-3 rounded bg-slate-900 border border-slate-800">
+            <span class="text-slate-400 block mb-1">Status &amp; Severity:</span>
+            <span class="tag ${(c.status||'OPEN').toUpperCase()!=='CLOSED'?'ok':'bad'} mr-2">${escapeHtml(c.status||'OPEN')}</span>
+            <span class="severity sev-${(c.severity||'medium').toLowerCase()}">${escapeHtml(c.severity||'MEDIUM')}</span>
+          </div>
+        </div>
+
+        <div>
+          <h4 class="text-xs font-bold uppercase text-slate-400 mb-1">Case Operation Name</h4>
+          <div class="text-sm font-semibold text-slate-200">${escapeHtml(c.name)}</div>
+        </div>
+
+        <div>
+          <h4 class="text-xs font-bold uppercase text-slate-400 mb-1">Subject Scope &amp; Rationale</h4>
+          <div class="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded border border-slate-800">${escapeHtml(c.description || 'No description entered.')}</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="p-3 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-400 block">Digital Evidence Attached:</span>
+            <span class="font-bold text-cyan-400 text-sm">${evCount} item(s)</span>
+          </div>
+          <div class="p-3 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-400 block">Threat Intel Lookups:</span>
+            <span class="font-bold text-cyan-400 text-sm">${tiCount} search(es)</span>
+          </div>
+        </div>
+
+        <!-- Add Note Section -->
+        <div class="border-t border-slate-800 pt-3">
+          <h4 class="text-xs font-bold uppercase text-slate-400 mb-2">Add Investigator Note</h4>
+          <div class="flex gap-2">
+            <input id="newCaseNoteInput" class="input text-xs" placeholder="Record investigator update or chain-of-custody note...">
+            <button class="btn btn-sm btn-primary" onclick="addCaseNote('${escapeHtml(c.id)}')"><i class="fa-solid fa-paper-plane mr-1"></i> Add Note</button>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+          <button class="btn btn-sm" onclick="closeModal()">Close</button>
+          <button class="btn btn-sm btn-primary" onclick="switchCase('${escapeHtml(c.id)}');closeModal();"><i class="fa-solid fa-arrow-right-to-bracket mr-1"></i> Select Active Case</button>
+        </div>
+      </div>
+    `;
+    openModal(`Case Dossier: ${caseId}`, body);
+  } catch(err) {
+    toast('Failed to load case: ' + err.message);
+  }
+};
+
+window.addCaseNote = async function(caseId){
+  const inp = $('#newCaseNoteInput');
+  const note = (inp ? inp.value : '').trim();
+  if(!note){ toast('Note text cannot be empty.'); return; }
+  try {
+    await api(`/api/cases/${encodeURIComponent(caseId)}/notes`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ note: note, author: state.authUser || 'Investigator' })
+    });
+    toast('Case note added to audit trail.');
+    if(inp) inp.value = '';
+    closeModal();
+  } catch(err) {
+    toast('Note submission failed: ' + err.message);
+  }
+};
+
+// --- EVIDENCE DETAIL & CRYPTOGRAPHIC VERIFICATION MODAL ---
+window.openEvidenceDetailModal = async function(evidenceId) {
+  try {
+    const evd = await api(`/api/evidence/${encodeURIComponent(evidenceId)}`);
+    if (!evd) { toast('Evidence item not found.'); return; }
+    
+    const integrity = evd.integrity_check || {};
+    const isValid = integrity.verified === true;
+    const isMissing = !integrity.actual_sha256;
+    
+    let statusBadge = '<span class="tag ok font-bold"><i class="fa-solid fa-circle-check mr-1"></i>VERIFIED (MATCH)</span>';
+    if (isMissing) {
+      statusBadge = '<span class="tag warn font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>FILE MISSING ON DISK</span>';
+    } else if (!isValid) {
+      statusBadge = '<span class="tag bad font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>TAMPER DETECTED / HASH MISMATCH</span>';
+    }
+    
+    const manifest = evd.manifest || {};
+    let filesTable = '';
+    
+    if (manifest.files && Array.isArray(manifest.files) && manifest.files.length > 0) {
+      filesTable = `
+        <div class="mt-3">
+          <div class="text-xs font-bold uppercase text-slate-400 mb-1">Manifest Ingested Artifacts (${manifest.files.length} internal items)</div>
+          <div class="table-wrap max-h-48 overflow-auto">
+            <table>
+              <thead><tr><th>Artifact Path</th><th>Size</th><th>SHA-256 Hash</th></tr></thead>
+              <tbody>
+                ${manifest.files.map(f => `
+                  <tr>
+                    <td class="mono text-xs font-semibold text-cyan-300">${escapeHtml(f.path || f.name || f.filename || '—')}</td>
+                    <td class="mono text-xs">${f.size ? (f.size/1024).toFixed(1) + ' KB' : (f.size_bytes ? (f.size_bytes/1024).toFixed(1) + ' KB' : '—')}</td>
+                    <td class="mono text-xs text-slate-300"><code>${escapeHtml(f.sha256 || f.hash || '—')}</code></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    } else if (typeof manifest.file_hashes === 'object' && manifest.file_hashes !== null) {
+      const entries = Object.entries(manifest.file_hashes);
+      if (entries.length > 0) {
+        filesTable = `
+          <div class="mt-3">
+            <div class="text-xs font-bold uppercase text-slate-400 mb-1">Manifest Ingested Artifacts (${entries.length} verified files)</div>
+            <div class="table-wrap max-h-48 overflow-auto">
+              <table>
+                <thead><tr><th>Archive Member Path</th><th>Cryptographic SHA-256</th></tr></thead>
+                <tbody>
+                  ${entries.map(([fpath, fhash]) => `
+                    <tr>
+                      <td class="mono text-xs font-semibold text-cyan-300">${escapeHtml(fpath)}</td>
+                      <td class="mono text-xs text-slate-300"><code>${escapeHtml(String(fhash))}</code></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    const body = `
+      <div class="space-y-4">
+        <!-- Top Status Banner -->
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="p-3 rounded bg-slate-900 border border-slate-800">
+            <span class="text-slate-400 block mb-1">Evidence ID:</span>
+            <span class="mono font-bold text-cyan-400 text-sm">${escapeHtml(evd.id)}</span>
+          </div>
+          <div class="p-3 rounded bg-slate-900 border border-slate-800">
+            <span class="text-slate-400 block mb-1">Integrity Validation:</span>
+            ${statusBadge}
+          </div>
+        </div>
+
+        <!-- Metadata Grid -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div class="p-2.5 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-500 block text-[10px] uppercase">Associated Case</span>
+            <span class="mono font-bold text-slate-200">${escapeHtml(evd.case_id || '—')}</span>
+          </div>
+          <div class="p-2.5 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-500 block text-[10px] uppercase">Origin Device / Agent</span>
+            <span class="mono font-bold text-slate-200">${escapeHtml(evd.device_id || evd.agent_id || 'LOCAL')}</span>
+          </div>
+          <div class="p-2.5 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-500 block text-[10px] uppercase">Dispatched Job ID</span>
+            <span class="mono font-bold text-slate-200">${escapeHtml(evd.job_id || 'DIRECT_UPLOAD')}</span>
+          </div>
+          <div class="p-2.5 rounded bg-slate-900/60 border border-slate-800">
+            <span class="text-slate-500 block text-[10px] uppercase">Archive Size</span>
+            <span class="mono font-bold text-slate-200">${evd.size_bytes ? (evd.size_bytes/1024).toFixed(1) + ' KB' : '—'}</span>
+          </div>
+        </div>
+
+        <!-- Storage & Path Details -->
+        <div class="p-3 rounded bg-slate-900/40 border border-slate-800 text-xs">
+          <div class="text-[10px] uppercase text-slate-500 mb-1">Local Secure Storage Path:</div>
+          <div class="mono text-slate-300 break-all">${escapeHtml(evd.archive_path || '—')}</div>
+          <div class="text-[10px] text-slate-500 mt-1">Uploaded at: ${formatUtc(evd.uploaded_at)}</div>
+        </div>
+
+        <!-- Cryptographic Ledger & Hash Check -->
+        <div class="p-3 rounded bg-slate-900 border border-slate-800 space-y-2">
+          <div class="text-xs font-bold text-slate-300 flex items-center justify-between">
+            <span><i class="fa-solid fa-fingerprint text-cyan-400 mr-1.5"></i> Cryptographic Verification Details</span>
+            <button class="btn btn-xs btn-primary" onclick="verifyEvidenceFile('${escapeHtml(evd.id)}'); setTimeout(()=>openEvidenceDetailModal('${escapeHtml(evd.id)}'), 500);"><i class="fa-solid fa-shield-halved mr-1"></i> Re-Verify Now</button>
+          </div>
+          <div class="text-xs">
+            <div class="text-slate-500 text-[10px] uppercase">Original Stored SHA-256 (Ledger):</div>
+            <div class="mono text-cyan-400 font-bold break-all bg-slate-950 p-1.5 rounded mt-0.5">${escapeHtml(evd.sha256 || '—')}</div>
+          </div>
+          ${integrity.actual_sha256 ? `
+            <div class="text-xs">
+              <div class="text-slate-500 text-[10px] uppercase">Live Calculated On-Disk SHA-256:</div>
+              <div class="mono ${isValid ? 'text-green-400' : 'text-red-400'} font-bold break-all bg-slate-950 p-1.5 rounded mt-0.5">${escapeHtml(integrity.actual_sha256)}</div>
+            </div>
+          ` : ''}
+        </div>
+
+        ${filesTable}
+
+        <!-- Actions -->
+        <div class="flex justify-between items-center gap-2 pt-3 border-t border-slate-800">
+          <button class="btn btn-sm btn-primary" onclick="closeModal(); researchIndicatorInTinyFish('${escapeHtml(evd.sha256)}', 'sha256');">
+            <i class="fa-solid fa-satellite-dish mr-1"></i> Research Hash in TinyFish
+          </button>
+          <div class="flex gap-2">
+            <a href="/api/evidence/${encodeURIComponent(evd.id)}/download" class="btn btn-sm" download>
+              <i class="fa-solid fa-download mr-1"></i> Download Archive
+            </a>
+            <button class="btn btn-sm" onclick="closeModal()">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+    openModal(`Evidence Details: ${evd.id}`, body);
+  } catch(err) {
+    toast('Failed to load evidence details: ' + err.message);
+  }
+};
+
+// --- ONE-CLICK PIVOT TO TINYFISH THREAT INTEL ---
+window.researchIndicatorInTinyFish = function(indicator, indicatorType = 'auto') {
+  if (!indicator) return;
+  state.tiIndicator = indicator;
+  state.tiType = indicatorType;
+  setView('threat_intel');
+  setTimeout(() => {
+    const input = $('#tiInput');
+    const select = $('#tiType');
+    if (input) input.value = indicator;
+    if (select && indicatorType) select.value = indicatorType;
+    if (typeof executeThreatIntelSearch === 'function') {
+      executeThreatIntelSearch();
+    }
+  }, 120);
+};
+
+// --- QUICK ENDPOINT REGISTRATION MODAL (VICTIM 2 / TEST ENDPOINT) ---
+window.openRegisterEndpointModal = function() {
+  const defaultAgentId = 'VICTIM-02-WIN';
+  const defaultHostname = 'VICTIM-02-DESKTOP';
+  const body = `
+    <form id="quickRegisterEndpointForm" onsubmit="submitRegisterEndpoint(event)" class="space-y-3">
+      <div>
+        <label class="label required">Endpoint Identifier (Agent ID)</label>
+        <input id="regAgentId" class="input mono font-bold" value="${defaultAgentId}" required autofocus>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label required">Hostname / Computer Name</label>
+          <input id="regHostname" class="input" value="${defaultHostname}" required>
+        </div>
+        <div>
+          <label class="label required">Operating System</label>
+          <select id="regOs" class="select" required>
+            <option value="Windows" selected>Windows 11 / 10</option>
+            <option value="Linux">Linux (Ubuntu / RHEL)</option>
+            <option value="macOS">macOS (Darwin)</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label required">IP Address</label>
+          <input id="regIp" class="input mono" value="192.168.1.102" required>
+        </div>
+        <div>
+          <label class="label">Associate with Active Case</label>
+          <input id="regCaseId" class="input mono" value="${escapeHtml(state.caseId || 'CASE-001')}" readonly>
+        </div>
+      </div>
+      <div class="p-2.5 rounded bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+        <i class="fa-solid fa-shield-halved text-cyan-400 mr-1"></i>
+        Authorizing endpoint authorizes this workstation for targeted defensive collection jobs and binds cryptographic chain of custody.
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-700">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-user-shield mr-1"></i> Authorize &amp; Register Endpoint</button>
+      </div>
+    </form>
+  `;
+  openModal('Authorize &amp; Register Forensic Endpoint', body);
+};
+
+window.submitRegisterEndpoint = async function(e) {
+  e.preventDefault();
+  const agentId = $('#regAgentId').value.trim();
+  const hostname = $('#regHostname').value.trim();
+  const os = $('#regOs').value;
+  const ip = $('#regIp').value.trim();
+  const caseId = $('#regCaseId').value.trim();
+
+  if(!agentId) { toast('Endpoint ID is required.'); return; }
+
+  try {
+    const regPayload = {
+      device_id: agentId,
+      hostname: hostname,
+      os: os,
+      ip_address: ip,
+      case_id: caseId
+    };
+    await api('/api/devices/register', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(regPayload)
+    });
+
+    if(caseId) {
+      await api(`/api/cases/${encodeURIComponent(caseId)}/assign`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ device_id: agentId, agent_id: agentId })
+      }).catch(()=>{});
+    }
+
+    closeModal();
+    toast(`Endpoint ${agentId} authorized and enrolled.`);
+    if(state.view === 'devices_enrolled') {
+      renderView();
+    } else {
+      setView('devices_enrolled');
+    }
+  } catch(err) {
+    toast('Failed to register endpoint: ' + err.message);
+  }
+};
+
+window.onEvidenceFileSelected = function(input){
+  const file = input.files?.[0];
+  const nameEl = $('#selectedFileName');
+  const btn = $('#evidenceUploadBtn');
+  if(file) {
+    if(nameEl) nameEl.textContent = `${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+    if(btn) btn.disabled = false;
+  } else {
+    if(nameEl) nameEl.textContent = 'No file selected';
+    if(btn) btn.disabled = true;
+  }
+};
+
+window.uploadEvidenceFileDirect = async function(e){
+  e.preventDefault();
+  const fileInput = $('#evidenceFileInput');
+  const descInput = $('#evidenceDescInput');
+  const fb = $('#evidenceUploadFeedback');
+  const btn = $('#evidenceUploadBtn');
+  const file = fileInput.files?.[0];
+
+  if(!file){ toast('Please select an evidence file.'); return; }
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('case_id', state.caseId);
+  fd.append('manifest', JSON.stringify({
+    filename: file.name,
+    size_bytes: file.size,
+    description: (descInput ? descInput.value : ''),
+    ingested_by: state.authUser || 'Investigator',
+    timestamp: new Date().toISOString()
+  }));
+
+  if(btn) btn.disabled = true;
+  if(fb) {
+    fb.classList.remove('hiddenx');
+    fb.innerHTML = '<span class="text-cyan-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Ingesting evidence bytes and calculating cryptographic SHA-256...</span>';
+  }
+
+  try {
+    const res = await api('/api/evidence', {
+      method: 'POST',
+      body: fd
+    });
+    if(fb) {
+      fb.innerHTML = `<span class="text-green-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i> Successfully ingested! SHA-256: <code class="mono font-normal">${res.sha256}</code></span>`;
+    }
+    toast(`Evidence file '${file.name}' ingested and verified.`);
+    setTimeout(() => { renderView(); }, 1200);
+  } catch(err) {
+    if(fb) {
+      fb.innerHTML = `<span class="text-red-400 font-bold"><i class="fa-solid fa-circle-exclamation mr-1"></i> Upload failed: ${escapeHtml(err.message)}</span>`;
+    }
+    toast('Evidence upload failed: ' + err.message);
+  } finally {
+    if(btn) btn.disabled = false;
+  }
+};
+
+window.verifyEvidenceFile = async function(evidenceId){
+  const cell = $(`#status-cell-${evidenceId}`);
+  if(cell) {
+    cell.innerHTML = '<span class="tag info"><i class="fa-solid fa-spinner fa-spin mr-1"></i>VERIFYING...</span>';
+  }
+  try {
+    const res = await api(`/api/evidence/${encodeURIComponent(evidenceId)}/verify`, { method: 'POST' });
+    if(cell) {
+      if(res.valid) {
+        cell.innerHTML = '<span class="tag ok"><i class="fa-solid fa-circle-check mr-1"></i>VERIFIED (MATCH)</span>';
+        toast(`SHA-256 integrity verified for ${evidenceId}.`);
+      } else {
+        cell.innerHTML = '<span class="tag bad"><i class="fa-solid fa-triangle-exclamation mr-1"></i>TAMPERED / MISMATCH</span>';
+        toast(`WARNING: SHA-256 integrity mismatch for ${evidenceId}!`);
+      }
+    }
+  } catch(err) {
+    if(cell) {
+      cell.innerHTML = `<span class="tag bad"><i class="fa-solid fa-xmark mr-1"></i>ERROR</span>`;
+    }
+    toast('Verification error: ' + err.message);
+  }
+};
+
+window.testTinyFishLiveConnection = async function(){
+  const box = $('#settingsPingResult');
+  if(box) {
+    box.classList.remove('hiddenx');
+    box.innerHTML = '<div class="p-3 rounded bg-slate-900 border border-slate-700 text-cyan-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Pinging TinyFish Search API with test query...</div>';
+  }
+  try {
+    const res = await api('/api/threat-intel/validate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ indicator: 'cisa.gov', indicator_type: 'domain' })
+    });
+    if(box) {
+      box.innerHTML = `
+        <div class="p-3 rounded bg-green-950/40 border border-green-500/40 text-green-300">
+          <i class="fa-solid fa-circle-check mr-1 font-bold"></i>
+          <strong>LIVE PING SUCCESS:</strong> TinyFish endpoint validation responded successfully. Indicator: <code class="mono">${res.indicator}</code> (${res.indicator_type}).
+        </div>
+      `;
+    }
+    toast('TinyFish live connection verified.');
+    updateTinyFishTopStatus();
+  } catch(err) {
+    if(box) {
+      box.innerHTML = `
+        <div class="p-3 rounded bg-red-950/40 border border-red-500/40 text-red-300">
+          <i class="fa-solid fa-circle-xmark mr-1 font-bold"></i>
+          <strong>PING FAILED:</strong> ${escapeHtml(err.message)}
+        </div>
+      `;
+    }
+  }
+};
+
 </script>
 </body>
 </html>

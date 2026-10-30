@@ -1,5 +1,5 @@
 """
-JOCKY DFIR Gateway — B9 Live Forensic Monitoring & Unified Timeline Engine
+Tiny Monitor — B9 Live Forensic Monitoring & Unified Timeline Engine
 Investigator-controlled real-time telemetry:
 - Process start and exit detection
 - Network connection snapshots

@@ -23,6 +23,12 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(root_dir, ".env"), override=True)
+except Exception:
+    pass
+
 from server.database import get_db_connection, init_db, DEFAULT_DB_PATH
 from server.models import CaseModel, ThreatIntelModel
 from server.tinyfish_service import TinyFishService, is_tinyfish_configured
@@ -94,6 +100,56 @@ TOOLS = [
                     "type": "integer",
                     "description": "Maximum findings to return (1-50, default 20).",
                     "default": 20,
+                },
+            },
+            "required": ["case_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "jocky_list_evidence",
+        "description": "Retrieve forensic evidence records and SHA-256 integrity status for a specific case.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "case_id": {
+                    "type": "string",
+                    "description": "Case identifier.",
+                },
+                "verify_integrity": {
+                    "type": "boolean",
+                    "description": "Recalculate SHA-256 digest from on-disk artifact bytes to verify integrity.",
+                    "default": True,
+                },
+            },
+            "required": ["case_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "jocky_get_research_history",
+        "description": "Retrieve persistent TinyFish public-web threat research history and source links for a case.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "case_id": {
+                    "type": "string",
+                    "description": "Case identifier.",
+                },
+            },
+            "required": ["case_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "jocky_generate_investigation_summary",
+        "description": "Generate an authorized investigation summary from persisted case records, evidence ledger, and TinyFish intelligence.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "case_id": {
+                    "type": "string",
+                    "description": "Case identifier.",
                 },
             },
             "required": ["case_id"],
@@ -203,6 +259,134 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 {
                     "type": "text",
                     "text": json.dumps({"case_id": cid, "count": len(findings), "findings": findings}, indent=2),
+                }
+            ]
+        }
+
+    elif name == "jocky_list_evidence":
+        cid = arguments.get("case_id", "").strip()
+        verify_integrity = arguments.get("verify_integrity", True)
+        if not cid:
+            raise ValueError("case_id is required")
+
+        conn = get_db_connection(db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT e.* FROM evidence e
+            JOIN jobs j ON e.job_id = j.id
+            JOIN sessions s ON j.session_id = s.id
+            WHERE s.case_id = ?
+            ORDER BY e.uploaded_at DESC
+        """, (cid,))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        from collector.manifest import calculate_sha256
+        evidence_items = []
+        verified_count = 0
+        mismatch_count = 0
+        missing_count = 0
+
+        for r in rows:
+            path = r.get("archive_path") or ""
+            stored_sha = r.get("sha256") or ""
+            item = {
+                "id": r.get("id"),
+                "job_id": r.get("job_id"),
+                "archive_path": path,
+                "size_bytes": r.get("size_bytes"),
+                "stored_sha256": stored_sha,
+                "uploaded_at": r.get("uploaded_at"),
+                "source_collector": r.get("source_collector"),
+            }
+            if verify_integrity:
+                if not os.path.exists(path):
+                    item["integrity_status"] = "FILE_MISSING"
+                    missing_count += 1
+                else:
+                    actual = calculate_sha256(path)
+                    item["actual_sha256"] = actual
+                    if actual == stored_sha:
+                        item["integrity_status"] = "VERIFIED_MATCH"
+                        verified_count += 1
+                    else:
+                        item["integrity_status"] = "TAMPERED_MISMATCH"
+                        mismatch_count += 1
+            evidence_items.append(item)
+
+        out_data = {
+            "case_id": cid,
+            "total_evidence_count": len(evidence_items),
+            "integrity_summary": {
+                "verified": verified_count,
+                "mismatch": mismatch_count,
+                "missing": missing_count,
+            } if verify_integrity else None,
+            "evidence": evidence_items,
+        }
+        return {"content": [{"type": "text", "text": json.dumps(out_data, indent=2)}]}
+
+    elif name == "jocky_get_research_history":
+        cid = arguments.get("case_id", "").strip()
+        if not cid:
+            raise ValueError("case_id is required")
+
+        records = ThreatIntelModel.list_for_case(cid, db_path)
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({
+                        "case_id": cid,
+                        "research_records_count": len(records),
+                        "research": records
+                    }, indent=2)
+                }
+            ]
+        }
+
+    elif name == "jocky_generate_investigation_summary":
+        cid = arguments.get("case_id", "").strip()
+        if not cid:
+            raise ValueError("case_id is required")
+
+        case = CaseModel.get_by_id(cid, db_path)
+        if not case:
+            return {"content": [{"type": "text", "text": json.dumps({"error": f"Case '{cid}' not found"}, indent=2)}], "isError": True}
+
+        from server.database import get_dfir_overview_stats
+        conn = get_db_connection(db_path)
+        stats = get_dfir_overview_stats(conn, case_id=cid)
+        findings = conn.execute("SELECT * FROM findings WHERE case_id = ?", (cid,)).fetchall()
+        research = conn.execute("SELECT * FROM threat_intel_research WHERE case_id = ?", (cid,)).fetchall()
+        evidence = conn.execute("""
+            SELECT e.* FROM evidence e
+            JOIN jobs j ON e.job_id = j.id
+            JOIN sessions s ON j.session_id = s.id
+            WHERE s.case_id = ?
+        """, (cid,)).fetchall()
+        conn.close()
+
+        summary_text = (
+            f"=== INVESTIGATION SUMMARY: {case.get('name')} ({cid}) ===\n"
+            f"Status: {case.get('status')} | Severity: {case.get('severity', 'MEDIUM')}\n"
+            f"Lead Investigator: {case.get('investigator_name') or 'DFIR Team'}\n"
+            f"Description: {case.get('description') or 'Defensive triage'}\n\n"
+            f"1. FORENSIC EVIDENCE LEDGER:\n"
+            f"   Total Preserved Packages: {len(evidence)}\n"
+            f"   Telemetry Artifacts Collected: {stats.get('counts', {}).get('artifacts', 0)}\n\n"
+            f"2. ATT&CK FINDINGS & CORRELATION:\n"
+            f"   Confirmed Findings: {len(findings)}\n"
+            f"   MITRE Techniques: {', '.join(set(str(f['mitre_technique']) for f in findings if f['mitre_technique'])) or 'None'}\n\n"
+            f"3. TINYFISH THREAT INTELLIGENCE RESEARCH:\n"
+            f"   Public Queries Executed: {len(research)}\n"
+            f"   Corroborating Web Sources: {sum(len(json.loads(r['sources_json'] or '[]')) for r in research)}\n"
+        )
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": summary_text
                 }
             ]
         }
