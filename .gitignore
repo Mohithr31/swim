@@ -57,3 +57,5 @@ build/
 
 # Logs
 *.log
+
+src/nexus_agent.egg-info/
